@@ -32,7 +32,7 @@ public class MainDialog extends JDialog implements NoiseHandshake.HandshakeNotif
 
         setLocationRelativeTo(null);
         SignalProtocolLoggerProvider.setProvider(this);
-        System.loadLibrary("libNoiseJni");
+        System.load(System.getProperty("user.dir") + "\\jni\\libNoiseJni.dll");
 
         long instance = NoiseJni.CreateInstance();
         NoiseJni.DestroyInstance(instance);
