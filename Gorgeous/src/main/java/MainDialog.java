@@ -25,6 +25,12 @@ public class MainDialog extends JDialog implements NoiseHandshake.HandshakeNotif
 
 
     public MainDialog() {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException ex) {
+        }
+
+        setLocationRelativeTo(null);
         SignalProtocolLoggerProvider.setProvider(this);
         System.loadLibrary("libNoiseJni");
 
