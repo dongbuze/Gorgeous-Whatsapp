@@ -246,97 +246,12 @@ public class NoiseHandshake {
             byte[] recvBuffer = NoiseJni.Decrypt(noiseHandshakeState_, date);
             if (recvBuffer.length > 0) {
                 ProtocolTreeNode node = ProtocolTreeNode.FromXml(ProtocolNodeJni.BytesToXml(recvBuffer));
-                switch (node.GetTag()){
-                    case "iq":{
-                        HandleIq(node);
-                        break;
-                    }
-                    case "call":{
-                        HandleCall(node);
-                        break;
-                    }
-                    case "stream:error":{
-                        HandleStreamError(node);
-                        break;
-                    }
-                    case "failure":{
-                        HandleFailure(node);
-                        break;
-                    }
-                    case "success":{
-                        HandleSuccess(node);
-                        break;
-                    }
-                    case "receipt":{
-                        HandleAeceipt(node);
-                        break;
-                    }
-                    case "message":{
-                        HandleRecvMessage(node);
-                        break;
-                    }
-                    case "ack":{
-                        HandleAck(node);
-                        break;
-                    }
-                    case "notification":{
-                        HandleNotification(node);
-                        break;
-                    }
-                    case "presence":{
-                        HandlePresence(node);
-                        break;
-                    }
-                    default:
-                    {
-                        break;
-                    }
-                }
+               if (null != notify_) {
+                   notify_.OnPush(node);
+               }
                 Log.i(TAG, node.toString());
             }
         }
-    }
-
-
-    void  HandlePresence(ProtocolTreeNode node) {
-
-    }
-
-
-    void  HandleIq(ProtocolTreeNode node) {
-
-    }
-
-    void HandleCall(ProtocolTreeNode node) {
-
-    }
-
-    void HandleStreamError(ProtocolTreeNode node) {
-
-    }
-
-    void HandleFailure(ProtocolTreeNode node) {
-
-    }
-
-    void HandleSuccess(ProtocolTreeNode node) {
-
-    }
-
-    void HandleAeceipt(ProtocolTreeNode node) {
-
-    }
-
-    void HandleRecvMessage(ProtocolTreeNode node) {
-
-    }
-
-    void HandleAck(ProtocolTreeNode node) {
-
-    }
-
-    void HandleNotification(ProtocolTreeNode node) {
-
     }
 
     byte[] publicServerKey_ = null;

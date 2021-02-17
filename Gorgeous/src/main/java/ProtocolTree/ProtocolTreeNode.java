@@ -1,34 +1,36 @@
 package ProtocolTree;
 
+import Util.StringUtil;
 import org.dom4j.*;
 import org.dom4j.io.SAXReader;
+
 import java.io.ByteArrayInputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.List;
+import java.util.*;
 
 public class ProtocolTreeNode {
     private String tag_;
     private byte[] data_;
-    private StanzaAttribute[] attributes_;
-    private ProtocolTreeNode[] children_;
-
-
-    public ProtocolTreeNode(String tag, StanzaAttribute[] attributes, ProtocolTreeNode[] children, byte[] data) {
-        this.tag_ = tag;
-        this.attributes_ = attributes;
-        this.children_ = children;
-        this.data_ = data;
-    }
+    private LinkedList<StanzaAttribute> attributes_;
+    private LinkedList<ProtocolTreeNode> children_;
+    private Object customParams_;
 
     public String IqId() {
-        for (int i=0; i< attributes_.length;i++) {
-            if (attributes_[i].key_.equals("id")) {
-                return attributes_[i].value_;
+        for (StanzaAttribute attribute :  attributes_) {
+            if (attribute.equals("id")) {
+                return attribute.value_;
             }
         }
         return "";
+    }
+
+    public Object GetCustomParams() {
+        return customParams_;
+    }
+
+    public  void SetCustomParams(Object customParams) {
+        customParams_ = customParams;
     }
 
     public byte[] GetData() {
@@ -39,8 +41,18 @@ public class ProtocolTreeNode {
         return tag_;
     }
 
-    public ProtocolTreeNode[] GetChildren() {
+    public LinkedList<ProtocolTreeNode> GetChildren() {
         return children_;
+    }
+
+    public LinkedList<ProtocolTreeNode> GetChildren(String name) {
+        LinkedList<ProtocolTreeNode> results = new LinkedList<>();
+        for (ProtocolTreeNode child : children_) {
+            if (child.GetTag().equals(name)) {
+                results.add(child);
+            }
+        }
+        return  results;
     }
 
     public static String BytesToString(byte[] bArr) {
@@ -55,26 +67,28 @@ public class ProtocolTreeNode {
     }
 
     public ProtocolTreeNode(String tag, StanzaAttribute[] attributes, byte[] data) {
-        this(tag, attributes, null, data);
-    }
+        this.tag_ = tag;
+        this.attributes_ = new LinkedList<>();
+        if (null != attributes) {
+            for (int i=0; i< attributes.length;i++) {
+                this.attributes_.add(attributes[i]);
+            }
+        }
 
-    public ProtocolTreeNode(String tag, StanzaAttribute[] attributes, String data) {
-        this(tag, attributes, null, data != null ? data.getBytes() : null);
-    }
-
-
-    public ProtocolTreeNode(String tag) {
-        this(tag, null ,null, null);
+        this.data_ = data;
     }
 
 
     public ProtocolTreeNode(String tag, StanzaAttribute[] attributes) {
-        this(tag, attributes ,null, null);
+        this(tag, attributes, null);
     }
 
+    public ProtocolTreeNode(String tag) {
+        this(tag,null);
+    }
 
     public final StanzaAttribute GetAttribute(String key) {
-        if (attributes_ == null || (attributes_.length) <= 0) {
+        if (attributes_ == null || attributes_.isEmpty()) {
             return null;
         }
         for (StanzaAttribute attribute : attributes_) {
@@ -85,31 +99,45 @@ public class ProtocolTreeNode {
         return null;
     }
 
-    public StanzaAttribute[] GetAttributes() {
+    public final String GetAttributeValue(String key) {
+        StanzaAttribute attribute = GetAttribute(key);
+        if (null == attribute) {
+            return "";
+        }
+        return attribute.value_;
+    }
+
+    public LinkedList<StanzaAttribute> GetAttributes() {
        return attributes_;
     }
 
+    public void SetData(byte[] data) {
+        data_ = data;
+    }
+
+    public void SetData(byte[] data, int offset, int len) {
+        data_ = new byte[len];
+        System.arraycopy(data, offset, data_, 0, len);
+    }
 
     static  ProtocolTreeNode InnerParseElement(Element element){
+        ProtocolTreeNode node = new ProtocolTreeNode(element.getName());
         List<Attribute> attributes = element.attributes();
-        StanzaAttribute[] stanzaAttributes = new StanzaAttribute[attributes.size()];
-        for (int i=0; i< attributes.size() ;i++) {
-            stanzaAttributes[i] = new StanzaAttribute( attributes.get(i).getName(),attributes.get(i).getValue());
+        for( Attribute attribute : attributes) {
+            node.attributes_.add(new StanzaAttribute(attribute.getName(), attribute.getValue()));
         }
-        byte[] data = null;
+
         String elementContent = element.getTextTrim();
         if (!Util.StringUtil.isEmpty(elementContent)) {
-            data = Base64.getDecoder().decode(elementContent);
+            node.SetData(Base64.getDecoder().decode(elementContent));
         }
 
         List<Element> childrenElements = element.elements();
-        ProtocolTreeNode[] childrenProtocolNode = new ProtocolTreeNode[childrenElements.size()];
-        for (int i=0;i<childrenElements.size();i++){
-            childrenProtocolNode[i] = InnerParseElement(childrenElements.get(i));
+        for (Element childElement : childrenElements){
+            node.AddChild(InnerParseElement(childElement));
         }
 
-
-        return new ProtocolTreeNode(element.getName(), stanzaAttributes, childrenProtocolNode, data);
+        return node;
     }
 
     public static ProtocolTreeNode FromXml(String xml){
@@ -126,19 +154,35 @@ public class ProtocolTreeNode {
     }
 
     static void  InnerToString(ProtocolTreeNode node, Branch parent) {
-        Element element = parent.addElement(node.tag_);
+        String namespace = null;
+        if (node.attributes_ != null) {
+            for (StanzaAttribute attribute : node.attributes_) {
+                if (attribute.key_.equals("xmlns")) {
+                    namespace = attribute.value_;
+                    break;
+                }
+            }
+        }
+
+        Element element = null;
+        if (StringUtil.isEmpty(namespace)) {
+            element = parent.addElement(node.tag_);
+        } else {
+            element = parent.addElement(node.tag_, namespace);
+        }
+
         if (node.data_ != null) {
             element.setText(Base64.getEncoder().encodeToString(node.data_));
         }
         if (node.attributes_ != null) {
-            for (int i=0; i< node.attributes_.length; i++) {
-                element.addAttribute(node.attributes_[i].key_, node.attributes_[i].value_);
+            for (StanzaAttribute attribute : node.attributes_) {
+                element.addAttribute(attribute.key_, attribute.value_);
             }
         }
 
         if (node.children_ != null) {
-            for (int i=0; i< node.children_.length; i++) {
-                InnerToString(node.children_[i], element);
+            for (ProtocolTreeNode child : node.children_) {
+                InnerToString(child, element);
             }
         }
     }
@@ -146,6 +190,21 @@ public class ProtocolTreeNode {
     public String toString() {
         Document document = DocumentHelper.createDocument();
         InnerToString(this, document);
+
         return  document.asXML();
+    }
+
+    public void AddChild(ProtocolTreeNode child) {
+        if (null == children_) {
+            children_ = new LinkedList<>();
+        }
+        children_.add(child);
+    }
+
+    public void AddAttribute(StanzaAttribute attribute) {
+        if (attributes_ == null) {
+            attributes_ = new LinkedList<>();
+        }
+        attributes_.add(attribute);
     }
 }

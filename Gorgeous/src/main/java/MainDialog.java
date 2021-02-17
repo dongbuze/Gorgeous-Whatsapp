@@ -1,8 +1,4 @@
-import Env.DeviceEnv;
-import Handshake.NoiseHandshake;
 import ProtocolTree.*;
-import axolotl.AxolotlManager;
-import com.google.protobuf.ByteString;
 import jni.NoiseJni;
 import org.whispersystems.libsignal.logging.Log;
 import org.whispersystems.libsignal.logging.SignalProtocolLogger;
@@ -11,17 +7,14 @@ import org.whispersystems.libsignal.logging.SignalProtocolLoggerProvider;
 import javax.swing.*;
 import java.awt.event.*;
 
-public class MainDialog extends JDialog implements NoiseHandshake.HandshakeNotify, SignalProtocolLogger {
+public class MainDialog extends JDialog implements SignalProtocolLogger, GorgeosEngine.GorgeosEngineDelegate {
     private static final String TAG = MainDialog.class.getSimpleName();
     private JPanel contentPane;
     private JButton buttonOK;
     private JButton buttonCancel;
     private JButton signal_test;
     private JButton logout;
-
-    NoiseHandshake noiseHandshake_;
-    DeviceEnv.AndroidEnv.Builder envBuilder_;
-    AxolotlManager axolotlManager_;
+    GorgeosEngine engine_;
 
 
     public MainDialog() {
@@ -70,24 +63,16 @@ public class MainDialog extends JDialog implements NoiseHandshake.HandshakeNotif
         signal_test.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent actionEvent) {
-                axolotlManager_ = new AxolotlManager(System.getProperty("user.dir") + "\\out\\axolotl.db");
-                try{
-                    byte[] envBuffer =  axolotlManager_.GetConfigStore().GetBytes("env");
-                    envBuilder_ = DeviceEnv.AndroidEnv.parseFrom(envBuffer).toBuilder();
-                    noiseHandshake_ = new NoiseHandshake(MainDialog.this, null);
-                    noiseHandshake_.StartNoiseHandShake( envBuilder_.build());
-                }
-                catch (Exception e){
-                    Log.w("noise" , e.getMessage());
-                }
+                /*Proxy proxy = new Proxy(Proxy.Type.HTTP,
+                        new InetSocketAddress("127.0.0.1", 1080));*/
+                engine_ = new GorgeosEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, null);
+                engine_.StartEngine();
             }
         });
         logout.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent actionEvent) {
-                if (null != noiseHandshake_) {
-                    noiseHandshake_.Disconnect();
-                }
+                engine_.StopEngine();
             }
         });
     }
@@ -110,30 +95,27 @@ public class MainDialog extends JDialog implements NoiseHandshake.HandshakeNotif
     }
 
     @Override
-    public void OnConnected(byte[] serverPublicKey) {
-        if (serverPublicKey != null) {
-            envBuilder_.setServerStaticPublic(ByteString.copyFrom(serverPublicKey));
-        } else {
-            envBuilder_.clearServerStaticPublic();
-        }
-
-        axolotlManager_.GetConfigStore().SetBytes("env", envBuilder_.build().toByteArray());
-        Log.i(TAG, "OnConnected:");
-    }
-
-    @Override
-    public void OnPush(ProtocolTreeNode node) {
-
-    }
-
-    @Override
-    public void OnDisconnected(String desc) {
-        Log.e(TAG, "OnDisconnected:" + desc);
-    }
-
-    @Override
     public void log(int priority, String tag, String message) {
-        System.out.println(tag);
-        System.out.println(message);
+
+    }
+
+    @Override
+    public void OnLogin(int code, ProtocolTreeNode desc) {
+        Log.i(TAG, "OnLogin:" + code + " desc:" + desc);
+    }
+
+    @Override
+    public void OnDisconnect(String desc) {
+        Log.i(TAG, "OnDisconnect:" + desc);
+    }
+
+    @Override
+    public void OnSync(ProtocolTreeNode content) {
+
+    }
+
+    @Override
+    public void OnPacketResponse(String type, ProtocolTreeNode content) {
+
     }
 }

@@ -1,9 +1,12 @@
 package Handshake;
 
+import org.whispersystems.libsignal.logging.Log;
+
 import java.io.IOException;
 import java.io.InputStream;
 
 public class ReadSocketStream {
+    public static final byte[] MAGICHEAD = {71, 79, 65};
     public static String TAG = ReadSocketStream.class.getName();
     public final InputStream SocketStream;
 

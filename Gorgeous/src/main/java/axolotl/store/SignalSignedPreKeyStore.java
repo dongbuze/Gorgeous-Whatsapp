@@ -55,6 +55,14 @@ public class SignalSignedPreKeyStore implements SignedPreKeyStore {
         return null;
     }
 
+    public SignedPreKeyRecord loadLatestSignedPreKey() {
+        List<SignedPreKeyRecord> records = loadSignedPreKeys();
+        if ((null == records) || (records.isEmpty())) {
+            return null;
+        }
+        return records.get(records.size() -1 );
+    }
+
     @Override
     public void storeSignedPreKey(int signedPreKeyId, SignedPreKeyRecord record) {
         try {

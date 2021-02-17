@@ -9,6 +9,7 @@ import org.whispersystems.libsignal.util.KeyHelper;
 import java.io.File;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 public class AxolotlManager {
@@ -44,6 +45,22 @@ public class AxolotlManager {
         }
         catch (Exception e){
             System.err.println(e.getMessage());
+        }
+    }
+
+    public void SetAutoCommit(boolean commit) {
+        try {
+            axolotlManager_.setAutoCommit(commit);
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+    }
+
+    public void Commit() {
+        try {
+            axolotlManager_.commit();
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
         }
     }
 
@@ -85,7 +102,6 @@ public class AxolotlManager {
             }
         }
         catch (Exception e){
-
         }
     }
     void CrateTables() {
