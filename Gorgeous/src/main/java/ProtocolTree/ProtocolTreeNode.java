@@ -18,7 +18,7 @@ public class ProtocolTreeNode {
 
     public String IqId() {
         for (StanzaAttribute attribute :  attributes_) {
-            if (attribute.equals("id")) {
+            if (attribute.key_.equals("id")) {
                 return attribute.value_;
             }
         }
@@ -53,6 +53,15 @@ public class ProtocolTreeNode {
             }
         }
         return  results;
+    }
+
+    public ProtocolTreeNode GetChild(String name) {
+        for (ProtocolTreeNode child : children_) {
+            if (child.GetTag().equals(name)) {
+                return child;
+            }
+        }
+        return  null;
     }
 
     public static String BytesToString(byte[] bArr) {

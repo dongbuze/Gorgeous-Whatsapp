@@ -6,6 +6,7 @@ import org.whispersystems.libsignal.logging.SignalProtocolLoggerProvider;
 
 import javax.swing.*;
 import java.awt.event.*;
+import java.net.*;
 
 public class MainDialog extends JDialog implements SignalProtocolLogger, GorgeosEngine.GorgeosEngineDelegate {
     private static final String TAG = MainDialog.class.getSimpleName();
@@ -63,10 +64,13 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeos
         signal_test.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent actionEvent) {
-                /*Proxy proxy = new Proxy(Proxy.Type.HTTP,
-                        new InetSocketAddress("127.0.0.1", 1080));*/
-                engine_ = new GorgeosEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, null);
-                engine_.StartEngine();
+                Proxy proxy = new Proxy(Proxy.Type.HTTP,
+                        new InetSocketAddress("127.0.0.1", 1080));
+                engine_ = new GorgeosEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, proxy);
+                boolean start = engine_.StartEngine();
+                if (!start) {
+                    Log.i(TAG, "start engine error");
+                }
             }
         });
         logout.addActionListener(new ActionListener() {
@@ -96,7 +100,7 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeos
 
     @Override
     public void log(int priority, String tag, String message) {
-
+        System.out.println(message);
     }
 
     @Override

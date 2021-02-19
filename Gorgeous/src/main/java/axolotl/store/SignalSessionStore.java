@@ -34,7 +34,7 @@ public class SignalSessionStore implements SessionStore {
         catch (Exception e){
             Log.e(TAG, e.getMessage());
         }
-        return null;
+        return new SessionRecord();
     }
 
     @Override
