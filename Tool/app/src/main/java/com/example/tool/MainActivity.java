@@ -294,7 +294,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         writeDb.execSQL("CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text)");
         ContentValues values = new ContentValues();
         values.put("key", "env");
-        values.put("value", Base64.encodeToString(envBuild.build().toByteArray(), 0));
+        values.put("value", Base64.encodeToString(envBuild.build().toByteArray(), Base64.NO_WRAP));
         writeDb.insert("settings",null, values);
         writeDb.close();
     }
