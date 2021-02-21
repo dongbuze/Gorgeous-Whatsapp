@@ -290,14 +290,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         mainDbPath_ = new File(dir, "axolotl.db").getAbsolutePath();
         AxolotlSQLiteOpenHelper srcDb = new AxolotlSQLiteOpenHelper(this, mainDbPath_);
         SQLiteDatabase writeDb = srcDb.getWritableDatabase();
-        writeDb.beginTransaction();
         //创建config 表
         writeDb.execSQL("CREATE TABLE IF NOT EXISTS settings(key text PRIMARY KEY,value text)");
         ContentValues values = new ContentValues();
         values.put("key", "env");
         values.put("value", Base64.encodeToString(envBuild.build().toByteArray(), 0));
         writeDb.insert("settings",null, values);
-        writeDb.endTransaction();
         writeDb.close();
     }
 
