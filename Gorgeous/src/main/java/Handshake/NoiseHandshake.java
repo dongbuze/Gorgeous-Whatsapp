@@ -29,9 +29,7 @@ import javax.crypto.BadPaddingException;
 import javax.crypto.ShortBufferException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.util.Random;
 
@@ -86,9 +84,9 @@ public class NoiseHandshake {
 
 
     void HandleSegment(byte[] body) {
-        if (handshakeStateMachine_.getCurrentState() == HandshakeXXState.WaitServerResponse) {
+        if (handshakeStateMachine_.getCurrentState() == HandshakeXXState.WaitFinish) {
             HandleXXServerHello(body);
-        } else if (handshakeStateMachine_.getCurrentState() == HandshakeIKState.WaitServerResponse) {
+        } else if (handshakeStateMachine_.getCurrentState() == HandshakeIKState.Finish) {
             HandleIKServerHello(body);
         } else {
             HandleReceivePacket(body);
@@ -105,7 +103,6 @@ public class NoiseHandshake {
 
     enum HandshakeXXState {
         Init,
-        WaitServerResponse,
         WaitFinish,
         Finish,
         ChannelReady
@@ -117,11 +114,6 @@ public class NoiseHandshake {
             System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
                     "' with context '"+context+"'.");
             context.SendClientHello();
-        }
-
-        protected void FromServerResponseToWaitFinish(HandshakeXXState from, HandshakeXXState to, HandshakeXXEvent event, NoiseHandshake context) {
-            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
-                    "' with context '"+context+"'.");
         }
 
         protected void Finish(HandshakeXXState from, HandshakeXXState to, HandshakeXXEvent event, NoiseHandshake context) {
@@ -211,7 +203,6 @@ public class NoiseHandshake {
 
     enum HandshakeIKState {
         Init,
-        WaitServerResponse,
         Finish,
         ChannelReady
     }
@@ -222,11 +213,6 @@ public class NoiseHandshake {
             System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
                     "' with context '"+context+"'.");
             context.SendPayload();
-        }
-
-        protected void FromServerResponseToFinish(HandshakeIKState from, HandshakeIKState to, HandshakeIKEvent event, NoiseHandshake context) {
-            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
-                    "' with context '"+context+"'.");
         }
 
         protected void Notify(HandshakeIKState from, HandshakeIKState to, HandshakeIKEvent event, NoiseHandshake context) {
@@ -291,7 +277,6 @@ public class NoiseHandshake {
             if (null != notify_) {
                 notify_.OnPush(node);
             }
-            Log.i(TAG, node.toString());
         }
     }
 
@@ -390,8 +375,7 @@ public class NoiseHandshake {
 
         //组装状态机
         UntypedStateMachineBuilder builder = StateMachineBuilderFactory.create(HandshakeXXStateMachine.class);
-        builder.externalTransition().from(HandshakeXXState.Init).to(HandshakeXXState.WaitServerResponse).on(HandshakeXXEvent.SendClientHello).callMethod("FromInitToWaitServerResponse");
-        builder.externalTransition().from(HandshakeXXState.WaitServerResponse).to(HandshakeXXState.WaitFinish).on(HandshakeXXEvent.HandleServerHello).callMethod("FromServerResponseToWaitFinish");
+        builder.externalTransition().from(HandshakeXXState.Init).to(HandshakeXXState.WaitFinish).on(HandshakeXXEvent.SendClientHello).callMethod("FromInitToWaitServerResponse");
         builder.externalTransition().from(HandshakeXXState.WaitFinish).to(HandshakeXXState.Finish).on(HandshakeXXEvent.SendClientFinish).callMethod("Finish");
         builder.externalTransition().from(HandshakeXXState.Finish).to(HandshakeXXState.ChannelReady).on(HandshakeXXEvent.Notify).callMethod("Notify");
         handshakeStateMachine_ = builder.newStateMachine(HandshakeXXState.Init);
@@ -405,8 +389,7 @@ public class NoiseHandshake {
         NoiseJni.StartHandshakeIK(noiseHandshakeState_, env_.getClientStaticKeyPair().getStrPrivateKey().toByteArray(),env_.getClientStaticKeyPair().getStrPubKey().toByteArray(),env_.getServerStaticPublic().toByteArray());
         //组装状态机
         UntypedStateMachineBuilder builder = StateMachineBuilderFactory.create(HandshakeIKStateMachine.class);
-        builder.externalTransition().from(HandshakeIKState.Init).to(HandshakeIKState.WaitServerResponse).on(HandshakeIKEvent.SendPayload).callMethod("FromInitToWaitServerResponse");
-        builder.externalTransition().from(HandshakeIKState.WaitServerResponse).to(HandshakeIKState.Finish).on(HandshakeIKEvent.HandleServerHello).callMethod("FromServerResponseToFinish");
+        builder.externalTransition().from(HandshakeIKState.Init).to(HandshakeIKState.Finish).on(HandshakeIKEvent.SendPayload).callMethod("FromInitToWaitServerResponse");
         builder.externalTransition().from(HandshakeIKState.Finish).to(HandshakeIKState.ChannelReady).on(HandshakeIKEvent.Notify).callMethod("Notify");
         handshakeStateMachine_ = builder.newStateMachine(HandshakeIKState.Init);
         handshakeStateMachine_.start();
@@ -442,11 +425,10 @@ public class NoiseHandshake {
             DeviceEnv.NoiseCertificate certificate = DeviceEnv.NoiseCertificate.parseFrom(ByteBuffer.wrap(payload));
             DeviceEnv.CertificateDetails details = DeviceEnv.CertificateDetails.parseFrom(certificate.getDetails());
             assert details.getIssuer() == "WhatsAppLongTerm1";
-            boolean checkSignature = Curve.verifySignature(new IdentityKey(HandshakeConfig.PUBLIC_KEY, 0).getPublicKey() , certificate.getDetails().toByteArray(), certificate.getSignature().toByteArray());
-            assert checkSignature;
+           return Curve.verifySignature(new IdentityKey(HandshakeConfig.PUBLIC_KEY, 0).getPublicKey() , certificate.getDetails().toByteArray(), certificate.getSignature().toByteArray());
         }
         catch (Exception e) {
-
+            Log.e(TAG, e.getLocalizedMessage());
         }
         return false;
     }

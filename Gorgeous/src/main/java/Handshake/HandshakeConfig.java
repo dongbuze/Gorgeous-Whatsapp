@@ -8,7 +8,7 @@ public class HandshakeConfig {
             "e13.whatsapp.net", "e14.whatsapp.net", "e15.whatsapp.net",
             "e16.whatsapp.net"};
 
-    public static final byte[] PUBLIC_KEY = new byte[]{20, 35, 117, 87, 77, 10, 88, 113, 102, -86, -25, 30, -66, 81, 100, 55, -60, -94, -117, 115, -29, 105, 92, 108, -31, -9, -7, 84, 93, -88, -18, 107};
+    public static final byte[] PUBLIC_KEY = new byte[]{5, 20, 35, 117, 87, 77, 10, 88, 113, 102, -86, -25, 30, -66, 81, 100, 55, -60, -94, -117, 115, -29, 105, 92, 108, -31, -9, -7, 84, 93, -88, -18, 107};
     public static int WRITE_MESSAGE = 16641;
     public static int READ_MESSAGE = 16642;
     public static int FAILED = 16643;
