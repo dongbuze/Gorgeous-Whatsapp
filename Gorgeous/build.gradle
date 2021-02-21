@@ -14,4 +14,6 @@ dependencies {
     compile "org.whispersystems:curve25519-java:0.5.0"
     compile 'com.google.protobuf:protobuf-java:3.10.0'
     compile 'org.xerial:sqlite-jdbc:3.34.0'
+    compile 'io.netty:netty-all:4.1.59.Final'
+    compile 'org.squirrelframework:squirrel-foundation:0.3.8'
 }

@@ -1,4 +1,6 @@
+import Handshake.NoiseHandshake;
 import ProtocolTree.*;
+import Util.GorgeoesLooper;
 import jni.NoiseJni;
 import org.whispersystems.libsignal.logging.Log;
 import org.whispersystems.libsignal.logging.SignalProtocolLogger;
@@ -19,6 +21,7 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeos
 
 
     public MainDialog() {
+        GorgeoesLooper.Instance().Init();
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException ex) {
@@ -64,9 +67,10 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeos
         signal_test.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent actionEvent) {
-                Proxy proxy = new Proxy(Proxy.Type.HTTP,
-                        new InetSocketAddress("127.0.0.1", 1080));
-                engine_ = new GorgeosEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, proxy);
+                /*NoiseHandshake.Proxy proxy = new NoiseHandshake.Proxy();
+                proxy.server = "127.0.0.1";
+                proxy.port = 10808;*/
+                engine_ = new GorgeosEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, null);
                 boolean start = engine_.StartEngine();
                 if (!start) {
                     Log.i(TAG, "start engine error");

@@ -2,28 +2,38 @@ package Handshake;
 
 import Env.DeviceEnv;
 import ProtocolTree.ProtocolTreeNode;
+import Util.GorgeoesLooper;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.proxy.Socks5ProxyHandler;
+import jni.NoiseJni;
 import jni.ProtocolNodeJni;
+import org.squirrelframework.foundation.fsm.StateMachineBuilderFactory;
+import org.squirrelframework.foundation.fsm.UntypedStateMachine;
+import org.squirrelframework.foundation.fsm.UntypedStateMachineBuilder;
+import org.squirrelframework.foundation.fsm.annotation.StateMachineParameters;
+import org.squirrelframework.foundation.fsm.impl.AbstractUntypedStateMachine;
 import org.whispersystems.libsignal.IdentityKey;
 import org.whispersystems.libsignal.ecc.Curve;
 import org.whispersystems.libsignal.logging.Log;
 import org.whispersystems.libsignal.util.KeyHelper;
 
-import jni.NoiseJni;
 import javax.crypto.BadPaddingException;
 import javax.crypto.ShortBufferException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.Socket;
+import java.net.SocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
 import java.util.Random;
-import java.util.concurrent.LinkedTransferQueue;
-
 
 public class NoiseHandshake {
     public interface HandshakeNotify {
@@ -32,169 +42,147 @@ public class NoiseHandshake {
         public void OnPush(ProtocolTreeNode node);
     }
 
-    Socket socket_ = null;
-    private ReadSocketStream readStream_;
-    private WriteSocketStream writeStream_;
-
-    static final String TAG = NoiseHandshake.class.getSimpleName();
-
-    //发送和接收线程
-    Thread recvThread_;
-    LinkedTransferQueue<ProtocolTreeNode> recv_queue_;
-
-    Thread sendThread_;
-    LinkedTransferQueue<ProtocolTreeNode> send_queue_;
-
-    long noiseHandshakeState_ = 0;
-
-    HandshakeNotify notify_;
-    Proxy proxy_;
-
-    public NoiseHandshake(HandshakeNotify notify, Proxy proxy) {
-        notify_ = notify;
-        proxy_ = proxy;
+    public static class Proxy {
+        public String server;
+        public int port;
+        public String userName;
+        public String password;
     }
 
-    public void Disconnect() {
-        notify_ = null;
+    //接收tcp 数据
+    class ClientHandler extends ChannelInboundHandlerAdapter {
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            OnChannelRead(ctx, msg);
+        }
+
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+                throws Exception {
+        }
+    }
+
+    void OnChannelRead(ChannelHandlerContext ctx, Object msg) {
+        receiveBuf_.writeBytes((ByteBuf)msg);
+        int readableBytes = receiveBuf_.readableBytes();
+        if (readableBytes < 3) {
+            //是否接收完头部数据
+            return;
+        }
+        byte[] lenBuffer = new byte[3];
+        receiveBuf_.getBytes(0, lenBuffer);
+        int bodyLen = HandshakeUtil.BodyBytesToLen(lenBuffer);
+        if (readableBytes < 3 + bodyLen) {
+            //判断是否接收完body
+            return;
+        }
+        byte[] body = new byte[bodyLen];
+        receiveBuf_.skipBytes(3);
+        receiveBuf_.readBytes(body);
+        receiveBuf_.discardReadBytes();
+        GorgeoesLooper.Instance().PostTask(() -> {
+            HandleSegment(body);
+        });
+    }
+
+
+    void HandleSegment(byte[] body) {
+        if (handshakeStateMachine_.getCurrentState() == HandshakeXXState.WaitServerResponse) {
+            HandleXXServerHello(body);
+        } else if (handshakeStateMachine_.getCurrentState() == HandshakeIKState.WaitServerResponse) {
+            HandleIKServerHello(body);
+        } else {
+            HandleReceivePacket(body);
+        }
+    }
+
+    //HandshakeXX StateMachine
+    enum HandshakeXXEvent {
+        SendClientHello,
+        HandleServerHello,
+        SendClientFinish,
+        Notify
+    }
+
+    enum HandshakeXXState {
+        Init,
+        WaitServerResponse,
+        WaitFinish,
+        Finish,
+        ChannelReady
+    }
+
+    @StateMachineParameters(stateType= HandshakeXXState.class, eventType=HandshakeXXEvent.class, contextType=NoiseHandshake.class)
+    static class HandshakeXXStateMachine extends AbstractUntypedStateMachine {
+        protected void FromInitToWaitServerResponse(HandshakeXXState from, HandshakeXXState to, HandshakeXXEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+            context.SendClientHello();
+        }
+
+        protected void FromServerResponseToWaitFinish(HandshakeXXState from, HandshakeXXState to, HandshakeXXEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+        }
+
+        protected void Finish(HandshakeXXState from, HandshakeXXState to, HandshakeXXEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+            context.HandshakeXXFinish();
+        }
+
+        protected void Notify(HandshakeXXState from, HandshakeXXState to, HandshakeXXEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+            context.NotifyConnect();
+        }
+    }
+
+    void SendClientHello() {
+        //1) 获取一个32 字节的公钥
+        byte[] ephemeral_public_buf = NoiseJni.WriteMessage(noiseHandshakeState_, null);
+        //2) 构造一个 client hello
+        DeviceEnv.HandshakeMessage.Builder builder = DeviceEnv.HandshakeMessage.newBuilder();
+        DeviceEnv.ClientHello.Builder clientHello = DeviceEnv.ClientHello.newBuilder();
+        clientHello.setEphemeral(ByteString.copyFrom(ephemeral_public_buf));
+        builder.setClientHello(clientHello);
+        //3) 发送数据
+        WriteSegment(builder.build().toByteArray()).addListener(future -> {
+            if (future.isSuccess()) {
+                //等待服务器回包，这里不需要修改状态
+            } else {
+                NotifyDisconnect(future.toString());
+            }
+        });
+    }
+
+    void HandshakeXXFinish() {
+        //1) 构造发送的payload
+        byte[] payload = CreateFullPayload();
+        //2) 加密数据
+        byte[] message = NoiseJni.WriteMessage(noiseHandshakeState_, payload) ;
+        //43 构造client finish
+        DeviceEnv.HandshakeMessage.Builder clientFinish = DeviceEnv.HandshakeMessage.newBuilder();
+        clientFinish.getClientFinishBuilder().setStatic(ByteString.copyFrom(message, 0, 48));
+        clientFinish.getClientFinishBuilder().setPayload(ByteString.copyFrom(message, 48, message.length - 48));
+        //5 发送数据
+        WriteSegment(clientFinish.build().toByteArray()).addListener(future -> {
+            if (future.isSuccess()) {
+                //获取加解密秘钥
+                handshakeStateMachine_.fire(HandshakeXXEvent.Notify, this);
+            } else {
+                NotifyDisconnect(future.toString());
+            }
+        });
+    }
+
+
+    void HandleXXServerHello(byte[] body) {
         try {
-            if (null != send_queue_) {
-                send_queue_.put(null);
-            }
-            if (null != recv_queue_) {
-                recv_queue_.put(null);
-            }
-            if (socket_ != null) {
-                socket_.close();
-                socket_ = null;
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        finally {
-            if (noiseHandshakeState_ != 0) {
-                NoiseJni.DestroyInstance(noiseHandshakeState_);
-                noiseHandshakeState_ = 0;
-            }
-        }
-    }
-
-    void NoiseHandShakeProc(Env.DeviceEnv.AndroidEnv env) throws IOException, NoSuchAlgorithmException, ShortBufferException, BadPaddingException {
-        //随机选择一个域名, tcp 连接
-        String server = HandshakeConfig.s_server[new Random().nextInt(HandshakeConfig.s_server.length)];
-        Log.i(TAG, "选择服务器:" + server);
-        if (null != proxy_){
-            socket_ = new Socket(proxy_);
-        } else {
-            socket_ = new Socket();
-        }
-
-        socket_.connect(new InetSocketAddress(server, 443));
-
-        InputStream read = socket_.getInputStream();
-        OutputStream write = socket_.getOutputStream();
-
-        byte[] routingInfo = env.getEdgeRoutingInfo().toByteArray();
-        write.write(NoiseJni.InitData(routingInfo));
-
-        readStream_ = new ReadSocketStream(read);
-        writeStream_ = new WriteSocketStream(write);
-        //开始noise 握手
-        if (!env.hasServerStaticPublic() || env.getServerStaticPublic() == null) {
-            HandshakeXX(env);
-        } else {
-            HandshakeIK(env);
-        }
-        if (notify_ != null){
-            notify_.OnConnected(publicServerKey_);
-        }
-        //启动接收线程，回调
-        recv_queue_ = new LinkedTransferQueue<>();
-        recvThread_ = new Thread(() -> {
-            while (true) {
-                try {
-                    ProtocolTreeNode node = recv_queue_.take();
-                    if (null != notify_) {
-                        notify_.OnPush(node);
-                    }
-                }
-                catch (Exception e) {
-                    Log.i(TAG, "接收线程退出:" + e.getLocalizedMessage());
-                }
-            }
-        });
-        recvThread_.start();
-        //启动发送线程
-        send_queue_ = new LinkedTransferQueue<>();
-        sendThread_ = new Thread(() -> {
-            while (true) {
-                try {
-                    ProtocolTreeNode node = send_queue_.take();
-                    byte[] data = ProtocolNodeJni.XmlToBytes(node.toString());
-                    byte[] cipherText = NoiseJni.Encrypt(noiseHandshakeState_, data);
-                    writeStream_.write(cipherText);
-                }
-                catch (Exception e){
-                    Log.i(TAG, "发送线程退出:" + e.getLocalizedMessage());
-                }
-            }
-        });
-        sendThread_.start();
-        LoopRecvSegment();
-    }
-
-    Thread noiseHandShakeThread_;
-    public void StartNoiseHandShake(Env.DeviceEnv.AndroidEnv env) {
-        noiseHandShakeThread_ = new Thread(() -> {
-            try {
-                NoiseHandShakeProc(env);
-            } catch (Exception e) {
-                if (null != notify_) {
-                    notify_.OnDisconnected(e.getLocalizedMessage());
-                }
-            }
-        });
-        noiseHandShakeThread_.start();
-    }
-
-    public String SendNode (ProtocolTreeNode node) {
-        send_queue_.add(node);
-        return  node.IqId();
-    }
-
-    private void HandshakeXX(Env.DeviceEnv.AndroidEnv env) throws IOException, NoSuchAlgorithmException, ShortBufferException, BadPaddingException {
-        Log.d(TAG, "start HandshakeXX");
-        //注册完之后第一次登陆
-        noiseHandshakeState_ = NoiseJni.CreateInstance();
-        //开始握手
-        int state = NoiseJni.StartHandshakeXX(noiseHandshakeState_, env.getClientStaticKeyPair().getStrPrivateKey().toByteArray(), env.getClientStaticKeyPair().getStrPubKey().toByteArray());
-
-
-        int currentAction = NoiseJni.GetAction(noiseHandshakeState_);
-        assert currentAction == HandshakeConfig.WRITE_MESSAGE;
-        {
-            //发送client hello
-            //1) 获取一个32 字节的公钥
-            byte[] ephemeral_public_buf = NoiseJni.WriteMessage(noiseHandshakeState_, null);
-            //2) 构造一个 client hello
-            DeviceEnv.HandshakeMessage.Builder builder = DeviceEnv.HandshakeMessage.newBuilder();
-            DeviceEnv.ClientHello.Builder clientHello = DeviceEnv.ClientHello.newBuilder();
-            clientHello.setEphemeral(ByteString.copyFrom(ephemeral_public_buf));
-            builder.setClientHello(clientHello);
-            //3) 发送数据
-            writeStream_.write(builder.build().toByteArray());
-            Log.d(TAG, "send client hello");
-        }
-        {
-            //接收服务器回包
-            DeviceEnv.HandshakeMessage serverHello = ReadServerHello();
+            DeviceEnv.HandshakeMessage serverHello = DeviceEnv.HandshakeMessage.parseFrom(body);
             if (!serverHello.hasServerHello()) {
-                Log.e(TAG, "server hello is empty");
-                throw new IOException("has no server hello");
+                NotifyDisconnect("hasServerHello no");
+                return;
             }
-            Log.d(TAG, "recv server:" + serverHello.toString());
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.READ_MESSAGE;
             byte[] ephemerial = serverHello.getServerHello().getEphemeral().toByteArray();
             byte[] staticBuffer = serverHello.getServerHello().getStatic().toByteArray();
             byte[] serverPayload = serverHello.getServerHello().getPayload().toByteArray();
@@ -207,86 +195,54 @@ public class NoiseHandshake {
             //校验证书，这步骤可以不做
             CheckCertificate(payload);
             publicServerKey_ = NoiseJni.GetServerPublicKey(noiseHandshakeState_);
-        }
-        {
-            Log.d(TAG, "send client finish");
-            //发送client finish
-            //1) 检查一下action 状态
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.WRITE_MESSAGE;
-            //2) 构造发送的payload
-            byte[] payload = CreateFullPayload(env);
-            //3) 加密数据
-            byte[] message = NoiseJni.WriteMessage(noiseHandshakeState_, payload) ;
-            //4 构造client finish
-            DeviceEnv.HandshakeMessage.Builder clientFinish = DeviceEnv.HandshakeMessage.newBuilder();
-            clientFinish.getClientFinishBuilder().setStatic(ByteString.copyFrom(message, 0, 48));
-            clientFinish.getClientFinishBuilder().setPayload(ByteString.copyFrom(message, 48, message.length - 48));
-            //5 发送数据
-            writeStream_.write(clientFinish.build().toByteArray());
-        }
-
-        {
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.SPLIT;
-            //获取加解密秘钥
-            NoiseJni.Split(noiseHandshakeState_);
-        }
-
-        {
-            //握手完成
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.COMPLETE ;
+            //流转下一次状态
+            handshakeStateMachine_.fire(HandshakeXXEvent.SendClientFinish, this);
+        } catch (InvalidProtocolBufferException e) {
+            NotifyDisconnect(e.getLocalizedMessage());
         }
     }
 
-    void LoopRecvSegment() throws IOException, BadPaddingException ,ShortBufferException {
-        while (true) {
-            byte[] date = ReadSegment();
-            byte[] recvBuffer = NoiseJni.Decrypt(noiseHandshakeState_, date);
-            if (recvBuffer.length > 0) {
-                ProtocolTreeNode node = ProtocolTreeNode.FromXml(ProtocolNodeJni.BytesToXml(recvBuffer));
-               if (null != notify_) {
-                   notify_.OnPush(node);
-               }
-                Log.i(TAG, node.toString());
-            }
+    //HandshakeIK StateMachine
+    enum HandshakeIKEvent {
+        SendPayload,
+        HandleServerHello,
+        Notify
+    }
+
+    enum HandshakeIKState {
+        Init,
+        WaitServerResponse,
+        Finish,
+        ChannelReady
+    }
+
+    @StateMachineParameters(stateType= HandshakeIKState.class, eventType=HandshakeIKEvent.class, contextType=NoiseHandshake.class)
+    static class HandshakeIKStateMachine extends AbstractUntypedStateMachine {
+        protected void FromInitToWaitServerResponse(HandshakeIKState from, HandshakeIKState to, HandshakeIKEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+            context.SendPayload();
+        }
+
+        protected void FromServerResponseToFinish(HandshakeIKState from, HandshakeIKState to, HandshakeIKEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+        }
+
+        protected void Notify(HandshakeIKState from, HandshakeIKState to, HandshakeIKEvent event, NoiseHandshake context) {
+            System.out.println("Transition from '"+from+"' to '"+to+"' on event '"+event+
+                    "' with context '"+context+"'.");
+            context.NotifyConnect();
         }
     }
 
-    byte[] publicServerKey_ = null;
-
-    private void HandshakeIK(Env.DeviceEnv.AndroidEnv env) throws IOException, NoSuchAlgorithmException, ShortBufferException, BadPaddingException {
-        Log.d(TAG, "start HandshakeIK");
-        noiseHandshakeState_ =  NoiseJni.CreateInstance();
-        NoiseJni.StartHandshakeIK(noiseHandshakeState_, env.getClientStaticKeyPair().getStrPrivateKey().toByteArray(),env.getClientStaticKeyPair().getStrPubKey().toByteArray(),env.getServerStaticPublic().toByteArray());
-        int currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-        assert currentAction == HandshakeConfig.WRITE_MESSAGE;
-        {
-            //发送payload
-            //1) 构造payload
-            byte[] payload = CreateFullPayload(env);
-            //2) 加密 payload
-            byte[] message = NoiseJni.WriteMessage(noiseHandshakeState_, payload);
-            //3) 构造 client hello
-            DeviceEnv.HandshakeMessage.Builder builder = DeviceEnv.HandshakeMessage.newBuilder();
-            DeviceEnv.ClientHello.Builder clientHello = DeviceEnv.ClientHello.newBuilder();
-            clientHello.setEphemeral(ByteString.copyFrom(message, 0, 32));
-            clientHello.setStatic(ByteString.copyFrom(message, 32 ,48));
-            clientHello.setPayload(ByteString.copyFrom(message, 32+48, message.length - 32 -48));
-            builder.setClientHello(clientHello);
-            //4) 发送数据
-            writeStream_.write(builder.build().toByteArray());
-        }
-        {
-            //接受server hello
-            DeviceEnv.HandshakeMessage serverHello = ReadServerHello();
+    void HandleIKServerHello(byte[] body) {
+        try {
+            DeviceEnv.HandshakeMessage serverHello = DeviceEnv.HandshakeMessage.parseFrom(body);
             if (!serverHello.hasServerHello()) {
-                throw new IOException("hasServerHello no");
+                NotifyDisconnect("hasServerHello no");
+                return;
             }
-            Log.d(TAG, "recv server:" + serverHello.toString());
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.READ_MESSAGE;
             byte[] ephemerial = serverHello.getServerHello().getEphemeral().toByteArray();
             byte[] staticBuffer = serverHello.getServerHello().getStatic().toByteArray();
             byte[] serverPayload = serverHello.getServerHello().getPayload().toByteArray();
@@ -299,37 +255,186 @@ public class NoiseHandshake {
                 //需要清理serverkey
                 publicServerKey_ = null;
             }
-        }
-        {
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.SPLIT;
-            //获取加解密秘钥
-            NoiseJni.Split(noiseHandshakeState_);
-        }
-
-        {
-            //握手完成
-            currentAction = NoiseJni.GetAction(noiseHandshakeState_);;
-            assert currentAction == HandshakeConfig.COMPLETE ;
+            //流转下一次状态
+            handshakeStateMachine_.fire(HandshakeIKEvent.Notify, this);
+        } catch (InvalidProtocolBufferException e) {
+            NotifyDisconnect(e.getLocalizedMessage());
         }
     }
 
-    private DeviceEnv.HandshakeMessage ReadServerHello() throws IOException {
-        byte[] body = ReadSegment();
-        if (null == body) {
-            throw  new IOException("read data error 2");
-        }
-        DeviceEnv.HandshakeMessage serverHello = DeviceEnv.HandshakeMessage.parseFrom(body);
-        return serverHello;
+    void SendPayload() {
+        //1) 构造payload
+        byte[] payload = CreateFullPayload();
+        //2) 加密 payload
+        byte[] message = NoiseJni.WriteMessage(noiseHandshakeState_, payload);
+        //3) 构造 client hello
+        DeviceEnv.HandshakeMessage.Builder builder = DeviceEnv.HandshakeMessage.newBuilder();
+        DeviceEnv.ClientHello.Builder clientHello = DeviceEnv.ClientHello.newBuilder();
+        clientHello.setEphemeral(ByteString.copyFrom(message, 0, 32));
+        clientHello.setStatic(ByteString.copyFrom(message, 32 ,48));
+        clientHello.setPayload(ByteString.copyFrom(message, 32+48, message.length - 32 -48));
+        builder.setClientHello(clientHello);
+        //4) 发送数据
+        WriteSegment(builder.build().toByteArray()).addListener(future -> {
+            if (future.isSuccess()) {
+                //等待服务器回包
+            } else {
+                NotifyDisconnect(future.toString());
+            }
+        });
     }
 
-    byte[] ReadSegment() throws IOException{
-        byte[] lenBuffer = readStream_.ReadData(3);
-        if (null == lenBuffer) {
-            throw  new IOException("read data error");
+    void HandleReceivePacket(byte[] body) {
+        byte[] recvBuffer = NoiseJni.Decrypt(noiseHandshakeState_, body);
+        if (recvBuffer.length > 0) {
+            ProtocolTreeNode node = ProtocolTreeNode.FromXml(ProtocolNodeJni.BytesToXml(recvBuffer));
+            if (null != notify_) {
+                notify_.OnPush(node);
+            }
+            Log.i(TAG, node.toString());
         }
-        int bodyLen = HandshakeUtil.BodyBytesToLen(lenBuffer);
-        return readStream_.ReadData(bodyLen);
+    }
+
+    static EventLoopGroup eventGroup_ = new NioEventLoopGroup();
+    static final String TAG = NoiseHandshake.class.getSimpleName();
+    ByteBuf receiveBuf_ = Unpooled.buffer();
+    Channel socketChannel_;
+    HandshakeNotify notify_;
+    Proxy proxy_;
+    long noiseHandshakeState_ = 0;
+    UntypedStateMachine handshakeStateMachine_;
+    Env.DeviceEnv.AndroidEnv env_;
+    byte[] publicServerKey_ = null;
+
+    public NoiseHandshake(HandshakeNotify notify, Proxy proxy) {
+        notify_ = notify;
+        proxy_ = proxy;
+    }
+
+    //开始进行noise 握手， 为了方便同步收发数据，这里简单在一个线程进行
+    public void StartNoiseHandShake(Env.DeviceEnv.AndroidEnv env) {
+        String server = HandshakeConfig.s_server[new Random().nextInt(HandshakeConfig.s_server.length)];
+        Log.i(TAG, "选择服务器:" + server);
+        Bootstrap bootstrap = new Bootstrap();
+        bootstrap.group(eventGroup_)
+                .channel(NioSocketChannel.class)
+                .handler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(SocketChannel ch) throws Exception {
+                        if (proxy_ != null) {
+                            ch.pipeline().addFirst(new Socks5ProxyHandler(new InetSocketAddress(proxy_.server, proxy_.port), proxy_.userName, proxy_.password));
+                        }
+                        ch.pipeline().addLast(new ClientHandler());
+                    }
+                });
+        ChannelFuture future = bootstrap.connect(server, 443);
+        //ChannelFuture future = bootstrap.connect("127.0.0.1", 18001);
+        future.addListener(connectFuture -> {
+            if (connectFuture.isSuccess()) {
+                env_ = env;
+                //连接成功开始走handshake流程
+                HandleNoiseHandshake();
+                socketChannel_.closeFuture().addListener(closeFuture -> {
+                    NotifyDisconnect(closeFuture.toString());
+                });
+            } else {
+                NotifyDisconnect(connectFuture.toString());
+            }
+        });
+        socketChannel_ = future.channel();
+    }
+
+    public void StopNoiseHandShake() {
+        if (socketChannel_ != null) {
+            socketChannel_.close();
+        }
+    }
+
+    public String SendNode (ProtocolTreeNode node) {
+        GorgeoesLooper.Instance().PostTask(()->{
+            try {
+                byte[] data = ProtocolNodeJni.XmlToBytes(node.toString());
+                byte[] cipherText = NoiseJni.Encrypt(noiseHandshakeState_, data);
+                WriteSegment(cipherText);
+            }
+            catch (Exception e) {
+            }
+        });
+        return node.IqId();
+    }
+
+    void HandleNoiseHandshake() throws IOException, NoSuchAlgorithmException, ShortBufferException, BadPaddingException {
+        //连接成功,发送初始化信息
+        byte[] routingInfo = env_.getEdgeRoutingInfo().toByteArray();
+        ChannelFuture future =  socketChannel_.writeAndFlush(Unpooled.copiedBuffer(NoiseJni.InitData(routingInfo)));
+        future.addListener(sendFuture -> {
+            if (sendFuture.isSuccess()) {
+                if (!env_.hasServerStaticPublic() || env_.getServerStaticPublic() == null) {
+                    HandshakeXX();
+                } else {
+                    HandshakeIK();
+                }
+            } else {
+                NotifyDisconnect(sendFuture.toString());
+            }
+        });
+    }
+
+
+
+    void HandshakeXX() throws InterruptedException, IOException {
+        Log.d(TAG, "start HandshakeXX");
+        noiseHandshakeState_ = NoiseJni.CreateInstance();
+        //开始握手
+        NoiseJni.StartHandshakeXX(noiseHandshakeState_, env_.getClientStaticKeyPair().getStrPrivateKey().toByteArray(), env_.getClientStaticKeyPair().getStrPubKey().toByteArray());
+
+        //组装状态机
+        UntypedStateMachineBuilder builder = StateMachineBuilderFactory.create(HandshakeXXStateMachine.class);
+        builder.externalTransition().from(HandshakeXXState.Init).to(HandshakeXXState.WaitServerResponse).on(HandshakeXXEvent.SendClientHello).callMethod("FromInitToWaitServerResponse");
+        builder.externalTransition().from(HandshakeXXState.WaitServerResponse).to(HandshakeXXState.WaitFinish).on(HandshakeXXEvent.HandleServerHello).callMethod("FromServerResponseToWaitFinish");
+        builder.externalTransition().from(HandshakeXXState.WaitFinish).to(HandshakeXXState.Finish).on(HandshakeXXEvent.SendClientFinish).callMethod("Finish");
+        builder.externalTransition().from(HandshakeXXState.Finish).to(HandshakeXXState.ChannelReady).on(HandshakeXXEvent.Notify).callMethod("Notify");
+        handshakeStateMachine_ = builder.newStateMachine(HandshakeXXState.Init);
+        handshakeStateMachine_.start();
+        handshakeStateMachine_.fire(HandshakeXXEvent.SendClientHello, this);
+    }
+
+    void HandshakeIK() {
+        Log.d(TAG, "start HandshakeIK");
+        noiseHandshakeState_ = NoiseJni.CreateInstance();
+        NoiseJni.StartHandshakeIK(noiseHandshakeState_, env_.getClientStaticKeyPair().getStrPrivateKey().toByteArray(),env_.getClientStaticKeyPair().getStrPubKey().toByteArray(),env_.getServerStaticPublic().toByteArray());
+        //组装状态机
+        UntypedStateMachineBuilder builder = StateMachineBuilderFactory.create(HandshakeIKStateMachine.class);
+        builder.externalTransition().from(HandshakeIKState.Init).to(HandshakeIKState.WaitServerResponse).on(HandshakeIKEvent.SendPayload).callMethod("FromInitToWaitServerResponse");
+        builder.externalTransition().from(HandshakeIKState.WaitServerResponse).to(HandshakeIKState.Finish).on(HandshakeIKEvent.HandleServerHello).callMethod("FromServerResponseToFinish");
+        builder.externalTransition().from(HandshakeIKState.Finish).to(HandshakeIKState.ChannelReady).on(HandshakeIKEvent.Notify).callMethod("Notify");
+        handshakeStateMachine_ = builder.newStateMachine(HandshakeIKState.Init);
+        handshakeStateMachine_.start();
+        handshakeStateMachine_.fire(HandshakeIKEvent.SendPayload, this);
+    }
+
+    ChannelFuture WriteSegment(byte[] data) {
+        ByteBuf buffer = Unpooled.buffer();
+        buffer.writeBytes(HandshakeUtil.GenerateDataHead(data.length));
+        buffer.writeBytes(data);
+        return socketChannel_.writeAndFlush(buffer);
+    }
+
+    void NotifyDisconnect(String detail) {
+        GorgeoesLooper.Instance().PostTask(()->{
+            if (null != notify_) {
+                notify_.OnDisconnected(detail);
+            }
+        });
+    }
+
+    void NotifyConnect() {
+        NoiseJni.Split(noiseHandshakeState_);
+        GorgeoesLooper.Instance().PostTask(()->{
+            if (null != notify_) {
+                notify_.OnConnected(publicServerKey_);
+            }
+        });
     }
 
     boolean CheckCertificate(byte[] payload)  {
@@ -346,7 +451,7 @@ public class NoiseHandshake {
         return false;
     }
 
-    byte[] CreateFullPayload(Env.DeviceEnv.AndroidEnv env_) {
+    byte[] CreateFullPayload() {
         DeviceEnv.ClientPayload.Builder clientPayload = DeviceEnv.ClientPayload.newBuilder();
         clientPayload.setUsername(Long.valueOf(env_.getFullphone()));
         clientPayload.setPassive(env_.getPassive());

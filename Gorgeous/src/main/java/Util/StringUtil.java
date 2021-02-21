@@ -1,5 +1,7 @@
 package Util;
 
+import java.util.UUID;
+
 public class StringUtil {
     public static StringBuilder StringAppender(String str) {
         StringBuilder sb = new StringBuilder();
@@ -31,5 +33,9 @@ public class StringUtil {
             sb.append(hex);
         }
         return sb.toString();
+    }
+
+    public static String GenerateIqId() {
+        return UUID.randomUUID().toString().replaceAll("-", "");
     }
 }

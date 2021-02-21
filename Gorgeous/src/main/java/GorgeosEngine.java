@@ -6,14 +6,15 @@ import ProtocolTree.StanzaAttribute;
 import Util.StringUtil;
 import axolotl.AxolotlManager;
 import com.google.protobuf.ByteString;
-import jni.ProtocolNodeJni;
 import org.whispersystems.libsignal.*;
 import org.whispersystems.libsignal.ecc.Curve;
 import org.whispersystems.libsignal.ecc.ECPublicKey;
 import org.whispersystems.libsignal.groups.GroupCipher;
 import org.whispersystems.libsignal.groups.GroupSessionBuilder;
 import org.whispersystems.libsignal.groups.SenderKeyName;
+import org.whispersystems.libsignal.groups.state.SenderKeyRecord;
 import org.whispersystems.libsignal.logging.Log;
+import org.whispersystems.libsignal.protocol.CiphertextMessage;
 import org.whispersystems.libsignal.protocol.PreKeySignalMessage;
 import org.whispersystems.libsignal.protocol.SenderKeyDistributionMessage;
 import org.whispersystems.libsignal.protocol.SignalMessage;
@@ -22,12 +23,9 @@ import org.whispersystems.libsignal.state.PreKeyRecord;
 import org.whispersystems.libsignal.state.SignedPreKeyRecord;
 
 import java.math.BigInteger;
-import java.net.Proxy;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
@@ -54,7 +52,7 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
 
 
     static final String TAG = GorgeosEngine.class.getName();
-    public  GorgeosEngine(String configPath, GorgeosEngineDelegate delegate, Proxy proxy) {
+    public  GorgeosEngine(String configPath, GorgeosEngineDelegate delegate, NoiseHandshake.Proxy proxy) {
         configPath_ = configPath;
         delegate_ = delegate;
         proxy_ = proxy;
@@ -62,10 +60,12 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
 
     boolean StartEngine() {
         axolotlManager_ = new AxolotlManager(configPath_);
+        /*ProtocolTreeNode node =  ProtocolTreeNode.FromXml(ProtocolNodeJni.BytesToXml(Base64.getDecoder().decode("APgQFgb6/wuEcFUGBYoWEEZhMxAFHwT7EPZOfsmS/AY7A77JjxX8dbkI+v+HhhhohnYILwMengn/BRYQiWcGGPwMQmFnbWFuQE5pY2t5+AH4CBITDQVURBX9AAEXMwghEiEFHYy7P6D/zgREgDTlxWjFW+TUrt8jBrDjJ3G7YApcTHsaIQWOFDn9pPxhQH9NfwzR7O5xrEPK7C+zbBupCUIpMAhaACLDATMKIQWR05/bW5qolURMSEy8pJZYSJUpp4OKUciL3dshGs3YNxAUGAAikAF7xWswjMVC+Gsy9uCHZDJ9A6MUfklE+V+IDzRvyEcnW15xUP8Za/nBbszYz3T8XSDPpgGZrlGaxDyFeYcu8QzU3djRYF5V3w91N5xveQfk2amuRmTpUIPyCIkQYEKvRU3yqI1fPfhYWtiG7APTWc+uf16Y0QIKL3tkos3GsYAMW9ebHWFsvSFMYDvT/gnNc2H2MmVJO9CybCiy2raJBTAA")));
+        HandleRecvMessage(node);*/
         try {
             byte[] envBuffer =  axolotlManager_.GetConfigStore().GetBytes("env");
             envBuilder_ = DeviceEnv.AndroidEnv.parseFrom(envBuffer).toBuilder();
-            noiseHandshake_ = new NoiseHandshake(this, null);
+            noiseHandshake_ = new NoiseHandshake(this, proxy_);
             noiseHandshake_.StartNoiseHandShake( envBuilder_.build());
             return true;
         }
@@ -77,14 +77,14 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
 
     void StopEngine() {
         if (noiseHandshake_ != null) {
-            noiseHandshake_.Disconnect();
+            noiseHandshake_.StopNoiseHandShake();
             noiseHandshake_ = null;
         }
     }
 
     private NoiseHandshake noiseHandshake_ = null;
     private String configPath_;
-    Proxy proxy_;
+    NoiseHandshake.Proxy proxy_;
     AxolotlManager axolotlManager_;
     DeviceEnv.AndroidEnv.Builder envBuilder_;
 
@@ -101,7 +101,6 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
 
     @Override
     public void OnDisconnected(String desc) {
-        Log.e(TAG, "OnDisconnected:" + desc);
         if (null != delegate_) {
             delegate_.OnDisconnect(desc);
         }
@@ -259,7 +258,7 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
         SessionCipher sessionCipher = new SessionCipher(axolotlManager_.GetSessionStore(), axolotlManager_.GetPreKeyStore(),axolotlManager_.GetSignedPreKeyStore(), axolotlManager_.GetIdentityKeyStore(), address);
         PreKeySignalMessage message = new PreKeySignalMessage(encNode.GetData());
         byte[] result = sessionCipher.decrypt(message);
-        if (message.getMessageVersion() == 2) {
+        if (encNode.GetAttributeValue("v").equals("2")) {
             ParseAndHandleMessageProto(recepid, result);
         }
         return result;
@@ -270,7 +269,7 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
         SessionCipher sessionCipher = new SessionCipher(axolotlManager_.GetSessionStore(), axolotlManager_.GetPreKeyStore(),axolotlManager_.GetSignedPreKeyStore(), axolotlManager_.GetIdentityKeyStore(), address);
         SignalMessage message = new SignalMessage(encNode.GetData());
         byte[] result = sessionCipher.decrypt(message);
-        if (message.getMessageVersion() == 2) {
+        if (encNode.GetAttributeValue("v").equals("2")) {
             ParseAndHandleMessageProto(recepid, result);
         }
         return result;
@@ -372,7 +371,7 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
         iq.AddAttribute(new StanzaAttribute("xmlns", "encrypt"));
         iq.AddAttribute(new StanzaAttribute("type", "get"));
         iq.AddAttribute(new StanzaAttribute("to", "s.whatsapp.net"));
-        iq.AddAttribute(new StanzaAttribute("id", UUID.randomUUID().toString().replaceAll("-", "")));
+        iq.AddAttribute(new StanzaAttribute("id", StringUtil.GenerateIqId()));
 
         ProtocolTreeNode key = new ProtocolTreeNode("key");
         for (String jid: jids) {
@@ -546,7 +545,7 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
         attributes[0] = new StanzaAttribute("type", "set");
         attributes[1] = new StanzaAttribute("xmlns", "encrypt");
         attributes[2] = new StanzaAttribute("to", "s.whatsapp.net");
-        attributes[3] = new StanzaAttribute("id", UUID.randomUUID().toString().replaceAll("-", ""));
+        attributes[3] = new StanzaAttribute("id", StringUtil.GenerateIqId());
         ProtocolTreeNode iqNode = new ProtocolTreeNode("iq", attributes);
         {
             // prekey 节点
@@ -650,13 +649,125 @@ public class GorgeosEngine implements NoiseHandshake.HandshakeNotify {
     ConcurrentHashMap<String, Integer> retries_ = new ConcurrentHashMap<>();
 
 
-    void  HandleFlushKey(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
+    void HandleFlushKey(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
         StanzaAttribute type = result.GetAttribute("type");
         if ((type != null) && (type.value_.equals("result"))) {
             //更新db
             LinkedList<Integer> sentPrekeyIds = (LinkedList<Integer>)srcNode.GetCustomParams();
             axolotlManager_.GetPreKeyStore().setAsSent(sentPrekeyIds);
         }
+    }
+
+    String JidNormalize(String jid) {
+        int pos = jid.indexOf("@");
+        if (pos != -1) {
+            return jid;
+        }
+        pos = jid.indexOf("-");
+        if (pos != -1) {
+            return jid + "@g.us";
+        }
+        return jid + "@s.whatsapp.net";
+    }
+
+    String SendSerialData(String jid, byte[] serialData, String messageType, String mediaType, String iqId) {
+        jid = JidNormalize(jid);
+        String recepid = jid;
+        int index =recepid.indexOf("@");
+        if (index != -1) {
+            recepid = recepid.substring(0, index);
+        }
+        boolean isGroup = jid.indexOf("-") != -1 ? true : false;
+        byte[] paddingData = new byte[serialData.length + 1];
+        paddingData[0] = 1;
+        System.arraycopy(serialData, 0, paddingData, 1, serialData.length);
+        if (isGroup) {
+            return SendToGroup(jid, paddingData, messageType, mediaType, iqId);
+        } else if (axolotlManager_.GetSessionStore().containsSession(recepid)) {
+            return SendToContact(jid, paddingData, messageType, mediaType, iqId);
+        } else {
+            if (StringUtil.isEmpty(iqId)) {
+                iqId = StringUtil.GenerateIqId();
+            }
+            LinkedList<String> jids = new LinkedList<>();
+            jids.add(jid);
+            String finalJid = jid;
+            String finalIqId = iqId;
+            GetKeysFor(jids, new NodeCallback() {
+                @Override
+                public void Run(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
+                    SendToContact(finalJid, paddingData,messageType, mediaType, finalIqId);
+                }
+            });
+            return iqId;
+        }
+    }
+
+    String SendToGroup(String jid, byte[] paddingData, String messageType, String mediaType, String iqId) {
+        SignalProtocolAddress address = new SignalProtocolAddress(envBuilder_.getFullphone(), 0);
+        SenderKeyName senderKeyName = new SenderKeyName(jid, address);
+        SenderKeyRecord senderKeyRecord = axolotlManager_.GetSenderKeyStore().loadSenderKey(senderKeyName);
+        if (null == senderKeyRecord) {
+            //获取群信息
+
+        } else {
+
+        }
+        return "";
+    }
+
+    String SendToContact(String jid, byte[] paddingData, String messageType, String mediaType, String iqId) {
+        String recepid = jid;
+        int index =recepid.indexOf("@");
+        if (index != -1) {
+            recepid = recepid.substring(0, index);
+        }
+        SignalProtocolAddress address = new SignalProtocolAddress(recepid, 0);
+        SessionCipher sessionCipher = new SessionCipher(axolotlManager_.GetSessionStore(), axolotlManager_.GetPreKeyStore(),axolotlManager_.GetSignedPreKeyStore(), axolotlManager_.GetIdentityKeyStore(), address);
+        CiphertextMessage ciphertextMessage = null;
+        try {
+            ciphertextMessage = sessionCipher.encrypt(paddingData);
+            return SendEncMessage(jid ,ciphertextMessage.serialize(), ciphertextMessage.getType(),messageType, mediaType, iqId);
+        } catch (UntrustedIdentityException e) {
+            e.printStackTrace();
+        }
+        return "";
+    }
+
+    String SendEncMessage(String jid, byte[] cipherText, int encType, String messageType, String mediaType, String iqId) {
+        ProtocolTreeNode msg = new ProtocolTreeNode("message");
+        if (StringUtil.isEmpty(iqId)) {
+            iqId = StringUtil.GenerateIqId();
+        }
+        msg.AddAttribute(new StanzaAttribute("id", iqId));
+        msg.AddAttribute(new StanzaAttribute("type", messageType));
+        msg.AddAttribute(new StanzaAttribute("to", jid));
+        msg.AddAttribute(new StanzaAttribute("t", String.valueOf(System.currentTimeMillis() / 1000)));
+
+        //enc node
+        ProtocolTreeNode encNode = new ProtocolTreeNode("enc");
+        encNode.SetData(cipherText);
+        if (!StringUtil.isEmpty(mediaType)) {
+            encNode.AddAttribute(new StanzaAttribute("mediatype", mediaType));
+        }
+        switch (encType) {
+            case CiphertextMessage.PREKEY_TYPE:
+            {
+                encNode.AddAttribute(new StanzaAttribute("type", "pkmsg"));
+            }
+            break;
+            case CiphertextMessage.SENDERKEY_TYPE:
+            {
+                encNode.AddAttribute(new StanzaAttribute("type", "skmsg"));
+            }
+            break;
+            default:
+            {
+                encNode.AddAttribute(new StanzaAttribute("type", "msg"));
+            }
+        }
+        msg.AddChild(encNode);
+        return AddTask(msg);
     }
 
     private GorgeosEngineDelegate delegate_ = null;

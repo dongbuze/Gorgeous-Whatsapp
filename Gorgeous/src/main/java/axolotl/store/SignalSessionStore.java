@@ -87,6 +87,11 @@ public class SignalSessionStore implements SessionStore {
         return false;
     }
 
+    public boolean containsSession(String receptid) {
+        SignalProtocolAddress address = new SignalProtocolAddress(receptid, 0);
+        return containsSession(address);
+    }
+
     @Override
     public void deleteSession(SignalProtocolAddress address) {
         try {
