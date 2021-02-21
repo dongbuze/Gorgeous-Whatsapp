@@ -54,7 +54,7 @@ public class SignalPreKeyStore implements PreKeyStore {
         axolotlManager_.Commit();
     }
 
-    public LinkedList<PreKeyRecord> loadUnSendPreKey() {
+    public LinkedList<PreKeyRecord> LoadUnSendPreKey() {
         LinkedList<PreKeyRecord> results = new LinkedList<>();
         try {
             PreparedStatement preparedStatement = axolotlManager_.GetPreparedStatement("SELECT record FROM prekeys WHERE sent_to_server is NULL or sent_to_server = 0");
@@ -68,6 +68,21 @@ public class SignalPreKeyStore implements PreKeyStore {
         }
         return  results;
     }
+
+    public int getPendingPreKeysCount() {
+        try {
+            PreparedStatement preparedStatement = axolotlManager_.GetPreparedStatement("SELECT count(*) FROM prekeys");
+            ResultSet rs = preparedStatement.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1);
+            }
+        }
+        catch (Exception e){
+            Log.e(TAG, e.getMessage());
+        }
+        return  0;
+    }
+
 
     @Override
     public void storePreKey(int preKeyId, PreKeyRecord record) {
@@ -112,7 +127,7 @@ public class SignalPreKeyStore implements PreKeyStore {
         }
     }
 
-    int getMaxPreKeyId() {
+    public int getMaxPreKeyId() {
         try {
             PreparedStatement preparedStatement = axolotlManager_.GetPreparedStatement("SELECT max(prekey_id) FROM prekeys");
             ResultSet rs = preparedStatement.executeQuery();
@@ -126,10 +141,9 @@ public class SignalPreKeyStore implements PreKeyStore {
         return 1;
     }
 
-    public List<PreKeyRecord> generatePreKey() {
-        int maxId = getMaxPreKeyId();
+    public List<PreKeyRecord> generatePreKeyAndStore(int startId, int count) {
         //生成812个
-        List<PreKeyRecord> preKeyRecords = KeyHelper.generatePreKeys(maxId + 1, 812);
+        List<PreKeyRecord> preKeyRecords = KeyHelper.generatePreKeys(startId + 1, count);
         //保存到数据库
         axolotlManager_.SetAutoCommit(false);
 

@@ -1,8 +1,19 @@
 package axolotl;
 
+import Env.DeviceEnv;
+import Util.GorgeoesLooper;
 import axolotl.store.*;
-import com.sun.org.apache.bcel.internal.generic.RET;
-import org.whispersystems.libsignal.IdentityKeyPair;
+import org.whispersystems.libsignal.*;
+import org.whispersystems.libsignal.groups.GroupCipher;
+import org.whispersystems.libsignal.groups.GroupSessionBuilder;
+import org.whispersystems.libsignal.groups.SenderKeyName;
+import org.whispersystems.libsignal.groups.state.SenderKeyRecord;
+import org.whispersystems.libsignal.protocol.CiphertextMessage;
+import org.whispersystems.libsignal.protocol.PreKeySignalMessage;
+import org.whispersystems.libsignal.protocol.SenderKeyDistributionMessage;
+import org.whispersystems.libsignal.protocol.SignalMessage;
+import org.whispersystems.libsignal.state.PreKeyBundle;
+import org.whispersystems.libsignal.state.PreKeyRecord;
 import org.whispersystems.libsignal.state.SignedPreKeyRecord;
 import org.whispersystems.libsignal.util.KeyHelper;
 
@@ -11,6 +22,9 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 
 public class AxolotlManager {
     private java.sql.Connection axolotlManager_ = null;
@@ -21,6 +35,10 @@ public class AxolotlManager {
     SignalSenderKeyStore senderKeyStore_ = null;
     SignalFastRatchetSenderKeyStore fastRatchetSenderKeyStore_ = null;
     ConfigStore configStore_ = null;
+    HashMap<String, SessionCipher> sessionCipherHashMap = new HashMap<>();
+    HashMap<SenderKeyName, GroupCipher> groupCipherHashMap = new HashMap<>();
+    GroupSessionBuilder groupSessionBuilder_;
+    String userName_;
 
 
     public AxolotlManager(String dbPath) {
@@ -42,6 +60,11 @@ public class AxolotlManager {
             senderKeyStore_ = new SignalSenderKeyStore(this);
             fastRatchetSenderKeyStore_ = new SignalFastRatchetSenderKeyStore(this);
             configStore_ = new ConfigStore(this);
+            groupSessionBuilder_ = new GroupSessionBuilder(senderKeyStore_);
+
+            byte[] envBuffer =  GetBytesSetting("env");
+            DeviceEnv.AndroidEnv.Builder builder = DeviceEnv.AndroidEnv.parseFrom(envBuffer).toBuilder();
+            userName_ = builder.getFullphone();
         }
         catch (Exception e){
             System.err.println(e.getMessage());
@@ -63,35 +86,6 @@ public class AxolotlManager {
             throwables.printStackTrace();
         }
     }
-
-    public SignalIdentityKeyStore GetIdentityKeyStore() {
-        return identityKeyStore_;
-    }
-
-    public SignalPreKeyStore GetPreKeyStore() {
-        return preKeyStore_;
-    }
-
-    public SignalSessionStore GetSessionStore() {
-        return sessionStore_;
-    }
-
-    public SignalSignedPreKeyStore GetSignedPreKeyStore() {
-        return signedPreKeyStore_;
-    }
-
-    public  SignalSenderKeyStore GetSenderKeyStore() {
-        return senderKeyStore_;
-    }
-
-    public SignalFastRatchetSenderKeyStore GetFastRatchetSenderKeyStore() {
-        return fastRatchetSenderKeyStore_;
-    }
-
-    public ConfigStore GetConfigStore() {
-        return configStore_;
-    }
-
 
     public void Close(){
         try
@@ -193,5 +187,173 @@ public class AxolotlManager {
         catch (Exception e){
 
         }
+    }
+
+    public List<PreKeyRecord> LevelPreKeys(boolean force) {
+        int count =  preKeyStore_.getPendingPreKeysCount();
+        if (force || count < 10) {
+            int maxId = preKeyStore_.getMaxPreKeyId();
+            return preKeyStore_.generatePreKeyAndStore(maxId, 812);
+        }
+        return null;
+    }
+
+    public void SetBytesSetting(String key, byte[] value) {
+        configStore_.SetBytes(key ,value);
+    }
+
+    public byte[] GetBytesSetting(String key) {
+        return configStore_.GetBytes(key);
+    }
+
+    public LinkedList<PreKeyRecord> LoadUnSendPreKey() {
+        return preKeyStore_.LoadUnSendPreKey();
+    }
+
+    public void SetAsSent(LinkedList<Integer> sentIds) {
+        preKeyStore_.setAsSent(sentIds);
+    }
+
+    public SignedPreKeyRecord LoadLatestSignedPreKey(boolean generate) {
+        List<SignedPreKeyRecord> records = signedPreKeyStore_.loadSignedPreKeys();
+        if ((null == records) || (records.isEmpty())) {
+            if (generate) {
+                return GenerateSignedPrekey();
+            }
+            return null;
+        }
+        return records.get(records.size() -1 );
+    }
+
+
+    public SignedPreKeyRecord GenerateSignedPrekey() {
+        SignedPreKeyRecord preKeyRecord = LoadLatestSignedPreKey(false);
+        int newSignedPrekeyId = 0;
+        if (null != preKeyRecord) {
+            newSignedPrekeyId = preKeyRecord.getId() + 1;
+        }
+        SignedPreKeyRecord result = null;
+        try {
+            result = KeyHelper.generateSignedPreKey(identityKeyStore_.getIdentityKeyPair(), newSignedPrekeyId);
+            signedPreKeyStore_.storeSignedPreKey(result.getId(), result);
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        }
+        return result;
+    }
+
+    public SessionCipher GetSessionCipher(String receiptId) {
+        GorgeoesLooper.Instance().CheckThread();
+        SessionCipher sessionCipher = sessionCipherHashMap.get(receiptId);
+        if (sessionCipher == null) {
+            SignalProtocolAddress address = new SignalProtocolAddress(receiptId, 0);
+            sessionCipher = new SessionCipher(sessionStore_, preKeyStore_,signedPreKeyStore_, identityKeyStore_, address);
+            sessionCipherHashMap.put(receiptId, sessionCipher);
+        }
+        return sessionCipher;
+    }
+
+    public GroupCipher GetGroupCipher(String groupId, String receiptId) {
+        GorgeoesLooper.Instance().CheckThread();
+        SignalProtocolAddress address = new SignalProtocolAddress(receiptId, 0);
+        SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
+        GroupCipher groupCipher = groupCipherHashMap.get(senderKeyName);
+        if (null == groupCipher) {
+            groupCipher = new GroupCipher(senderKeyStore_, senderKeyName);
+            groupCipherHashMap.put(senderKeyName, groupCipher);
+        }
+        return groupCipher;
+    }
+
+
+    public CiphertextMessage Encrypt(String receiptId, byte[] message) throws UntrustedIdentityException {
+        GorgeoesLooper.Instance().CheckThread();
+        SessionCipher cipher = GetSessionCipher(receiptId);
+        //固定加一个padding
+        byte[] paddingData = new byte[message.length + 1];
+        System.arraycopy(message, 0, paddingData, 0, message.length);
+        paddingData[paddingData.length - 1] = 1;
+        return cipher.encrypt(paddingData);
+    }
+
+    public byte[] DecryptPKMsg(String senderId, byte[] data) throws InvalidVersionException, InvalidMessageException, InvalidKeyException, DuplicateMessageException, InvalidKeyIdException, UntrustedIdentityException, LegacyMessageException {
+        GorgeoesLooper.Instance().CheckThread();
+        PreKeySignalMessage message = new PreKeySignalMessage(data);
+        byte[] plaintext = GetSessionCipher(senderId).decrypt(message);
+        int padding = plaintext[plaintext.length-1];
+
+        byte[] result = new byte[plaintext.length - padding];
+        System.arraycopy(plaintext, 0, result, 0, result.length);
+        return result;
+    }
+
+    public byte[] DecryptMsg(String senderId, byte[] data) throws LegacyMessageException, InvalidMessageException, DuplicateMessageException, NoSessionException, UntrustedIdentityException {
+        GorgeoesLooper.Instance().CheckThread();
+        SignalMessage message = new SignalMessage(data);
+        byte[] plaintext = GetSessionCipher(senderId).decrypt(message);
+        int padding = plaintext[plaintext.length-1];
+
+        byte[] result = new byte[plaintext.length - padding];
+        System.arraycopy(plaintext, 0, result, 0, result.length);
+        return result;
+    }
+
+    public byte[] GroupEncrypt(String groupId, byte[] message) throws NoSessionException, InvalidKeyException {
+        GorgeoesLooper.Instance().CheckThread();
+        GroupCipher cipher = GetGroupCipher(groupId, userName_);
+        //固定加一个padding
+        byte[] paddingData = new byte[message.length + 1];
+        System.arraycopy(message, 0, paddingData, 0, message.length);
+        paddingData[paddingData.length - 1] = 1;
+        return cipher.encrypt(paddingData);
+    }
+
+    public byte[] GroupDecrypt(String groupId, String participantId, byte[] data) throws NoSessionException, DuplicateMessageException, InvalidMessageException, LegacyMessageException {
+        GorgeoesLooper.Instance().CheckThread();
+        GroupCipher cipher = GetGroupCipher(groupId, participantId);
+        byte[] plaintext = cipher.decrypt(data);
+        int padding = plaintext[plaintext.length-1];
+
+        byte[] result = new byte[plaintext.length - padding];
+        System.arraycopy(plaintext, 0, result, 0, result.length);
+        return result;
+    }
+
+    public SenderKeyDistributionMessage GroupCreateSKMsg(String groupId) {
+        GorgeoesLooper.Instance().CheckThread();
+        SignalProtocolAddress address = new SignalProtocolAddress(userName_, 0);
+        SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
+        return groupSessionBuilder_.create(senderKeyName);
+    }
+
+    public void GroupCreateSession(String groupId, String participantId, byte[] data) throws InvalidMessageException, LegacyMessageException {
+        GorgeoesLooper.Instance().CheckThread();
+        SignalProtocolAddress address = new SignalProtocolAddress(participantId, 0);
+        SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
+        groupSessionBuilder_.process(senderKeyName, new SenderKeyDistributionMessage(data));
+    }
+
+    public void CreateSession(String receiptId, PreKeyBundle bundle) throws UntrustedIdentityException, InvalidKeyException {
+        SignalProtocolAddress address = new SignalProtocolAddress(receiptId, 0);
+        SessionBuilder sessionBuilder = new SessionBuilder(sessionStore_,preKeyStore_, signedPreKeyStore_, identityKeyStore_ ,address);
+        sessionBuilder.process(bundle);
+    }
+
+    public SenderKeyRecord LoadSenderKey(String groupId) {
+        SignalProtocolAddress address = new SignalProtocolAddress(userName_, 0);
+        SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
+        return senderKeyStore_.loadSenderKey(senderKeyName);
+    }
+
+    public int getLocalRegistrationId() {
+        return identityKeyStore_.getLocalRegistrationId();
+    }
+
+    public IdentityKeyPair GetIdentityKeyPair() {
+        return identityKeyStore_.getIdentityKeyPair();
+    }
+
+    public boolean ContainsSession(String receiptId) {
+        return sessionStore_.containsSession(receiptId);
     }
 }

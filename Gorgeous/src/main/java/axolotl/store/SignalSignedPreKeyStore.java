@@ -21,7 +21,6 @@ public class SignalSignedPreKeyStore implements SignedPreKeyStore {
         axolotlManager_ = axolotlManager;
     }
 
-
     @Override
     public SignedPreKeyRecord loadSignedPreKey(int signedPreKeyId) throws InvalidKeyIdException {
         try {
@@ -53,14 +52,6 @@ public class SignalSignedPreKeyStore implements SignedPreKeyStore {
             Log.e(TAG, e.getMessage());
         }
         return null;
-    }
-
-    public SignedPreKeyRecord loadLatestSignedPreKey() {
-        List<SignedPreKeyRecord> records = loadSignedPreKeys();
-        if ((null == records) || (records.isEmpty())) {
-            return null;
-        }
-        return records.get(records.size() -1 );
     }
 
     @Override

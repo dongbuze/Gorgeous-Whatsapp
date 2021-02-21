@@ -31,6 +31,16 @@ public class GorgeoesLooper {
         }
     }
 
+    public void CheckThread() {
+        if(runnableThread_.getId() == Thread.currentThread().getId()) {
+            try {
+                throw new Exception("call thread is not in looper thread");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     public void PostTask(Runnable runnable) {
         tasks_.add(runnable);
     }

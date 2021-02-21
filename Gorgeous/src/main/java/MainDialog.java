@@ -10,14 +10,14 @@ import javax.swing.*;
 import java.awt.event.*;
 import java.net.*;
 
-public class MainDialog extends JDialog implements SignalProtocolLogger, GorgeosEngine.GorgeosEngineDelegate {
+public class MainDialog extends JDialog implements SignalProtocolLogger, GorgeousEngine.GorgeousEngineDelegate {
     private static final String TAG = MainDialog.class.getSimpleName();
     private JPanel contentPane;
     private JButton buttonOK;
     private JButton buttonCancel;
     private JButton signal_test;
     private JButton logout;
-    GorgeosEngine engine_;
+    GorgeousEngine engine_;
 
 
     public MainDialog() {
@@ -70,7 +70,7 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeos
                 /*NoiseHandshake.Proxy proxy = new NoiseHandshake.Proxy();
                 proxy.server = "127.0.0.1";
                 proxy.port = 10808;*/
-                engine_ = new GorgeosEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, null);
+                engine_ = new GorgeousEngine(System.getProperty("user.dir") + "\\out\\axolotl.db", MainDialog.this, null);
                 boolean start = engine_.StartEngine();
                 if (!start) {
                     Log.i(TAG, "start engine error");
