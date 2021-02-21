@@ -1,6 +1,6 @@
 import Handshake.NoiseHandshake;
 import ProtocolTree.*;
-import Util.GorgeoesLooper;
+import Util.GorgeousLooper;
 import jni.NoiseJni;
 import org.whispersystems.libsignal.logging.Log;
 import org.whispersystems.libsignal.logging.SignalProtocolLogger;
@@ -21,7 +21,7 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeou
 
 
     public MainDialog() {
-        GorgeoesLooper.Instance().Init();
+        GorgeousLooper.Instance().Init();
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException ex) {

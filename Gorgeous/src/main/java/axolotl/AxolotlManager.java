@@ -1,7 +1,7 @@
 package axolotl;
 
 import Env.DeviceEnv;
-import Util.GorgeoesLooper;
+import Util.GorgeousLooper;
 import axolotl.store.*;
 import org.whispersystems.libsignal.*;
 import org.whispersystems.libsignal.groups.GroupCipher;
@@ -243,7 +243,7 @@ public class AxolotlManager {
     }
 
     public SessionCipher GetSessionCipher(String receiptId) {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         SessionCipher sessionCipher = sessionCipherHashMap.get(receiptId);
         if (sessionCipher == null) {
             SignalProtocolAddress address = new SignalProtocolAddress(receiptId, 0);
@@ -254,7 +254,7 @@ public class AxolotlManager {
     }
 
     public GroupCipher GetGroupCipher(String groupId, String receiptId) {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         SignalProtocolAddress address = new SignalProtocolAddress(receiptId, 0);
         SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
         GroupCipher groupCipher = groupCipherHashMap.get(senderKeyName);
@@ -267,7 +267,7 @@ public class AxolotlManager {
 
 
     public CiphertextMessage Encrypt(String receiptId, byte[] message) throws UntrustedIdentityException {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         SessionCipher cipher = GetSessionCipher(receiptId);
         //固定加一个padding
         byte[] paddingData = new byte[message.length + 1];
@@ -277,7 +277,7 @@ public class AxolotlManager {
     }
 
     public byte[] DecryptPKMsg(String senderId, byte[] data) throws InvalidVersionException, InvalidMessageException, InvalidKeyException, DuplicateMessageException, InvalidKeyIdException, UntrustedIdentityException, LegacyMessageException {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         PreKeySignalMessage message = new PreKeySignalMessage(data);
         byte[] plaintext = GetSessionCipher(senderId).decrypt(message);
         int padding = plaintext[plaintext.length-1];
@@ -288,7 +288,7 @@ public class AxolotlManager {
     }
 
     public byte[] DecryptMsg(String senderId, byte[] data) throws LegacyMessageException, InvalidMessageException, DuplicateMessageException, NoSessionException, UntrustedIdentityException {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         SignalMessage message = new SignalMessage(data);
         byte[] plaintext = GetSessionCipher(senderId).decrypt(message);
         int padding = plaintext[plaintext.length-1];
@@ -299,7 +299,7 @@ public class AxolotlManager {
     }
 
     public byte[] GroupEncrypt(String groupId, byte[] message) throws NoSessionException, InvalidKeyException {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         GroupCipher cipher = GetGroupCipher(groupId, userName_);
         //固定加一个padding
         byte[] paddingData = new byte[message.length + 1];
@@ -309,7 +309,7 @@ public class AxolotlManager {
     }
 
     public byte[] GroupDecrypt(String groupId, String participantId, byte[] data) throws NoSessionException, DuplicateMessageException, InvalidMessageException, LegacyMessageException {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         GroupCipher cipher = GetGroupCipher(groupId, participantId);
         byte[] plaintext = cipher.decrypt(data);
         int padding = plaintext[plaintext.length-1];
@@ -320,14 +320,14 @@ public class AxolotlManager {
     }
 
     public SenderKeyDistributionMessage GroupCreateSKMsg(String groupId) {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         SignalProtocolAddress address = new SignalProtocolAddress(userName_, 0);
         SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
         return groupSessionBuilder_.create(senderKeyName);
     }
 
     public void GroupCreateSession(String groupId, String participantId, byte[] data) throws InvalidMessageException, LegacyMessageException {
-        GorgeoesLooper.Instance().CheckThread();
+        GorgeousLooper.Instance().CheckThread();
         SignalProtocolAddress address = new SignalProtocolAddress(participantId, 0);
         SenderKeyName senderKeyName = new SenderKeyName(groupId, address);
         groupSessionBuilder_.process(senderKeyName, new SenderKeyDistributionMessage(data));

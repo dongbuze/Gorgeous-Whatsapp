@@ -3,7 +3,7 @@ package Util;
 import java.util.concurrent.LinkedTransferQueue;
 
 //抛到looper中的task，会在一个线程中处理，可以在任意线程抛任务，会在同一个线程处理
-public class GorgeoesLooper {
+public class GorgeousLooper {
     public void Init() {
         //启动线程循环读取task并执行
         runnableThread_ = new Thread(()->{
@@ -32,7 +32,7 @@ public class GorgeoesLooper {
     }
 
     public void CheckThread() {
-        if(runnableThread_.getId() == Thread.currentThread().getId()) {
+        if(runnableThread_.getId() != Thread.currentThread().getId()) {
             try {
                 throw new Exception("call thread is not in looper thread");
             } catch (Exception e) {
@@ -45,13 +45,13 @@ public class GorgeoesLooper {
         tasks_.add(runnable);
     }
 
-    public static GorgeoesLooper Instance() {
-        return s_GorgeoesLooper;
+    public static GorgeousLooper Instance() {
+        return s_GorgeousLooper;
     }
 
     private LinkedTransferQueue<Runnable> tasks_ = new LinkedTransferQueue<>();
     private Thread runnableThread_;
-    private static GorgeoesLooper s_GorgeoesLooper = new GorgeoesLooper();
-    private GorgeoesLooper() {
+    private static GorgeousLooper s_GorgeousLooper = new GorgeousLooper();
+    private GorgeousLooper() {
     }
 }

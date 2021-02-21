@@ -2,7 +2,7 @@ package Handshake;
 
 import Env.DeviceEnv;
 import ProtocolTree.ProtocolTreeNode;
-import Util.GorgeoesLooper;
+import Util.GorgeousLooper;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.netty.bootstrap.Bootstrap;
@@ -77,7 +77,7 @@ public class NoiseHandshake {
         receiveBuf_.skipBytes(3);
         receiveBuf_.readBytes(body);
         receiveBuf_.discardReadBytes();
-        GorgeoesLooper.Instance().PostTask(() -> {
+        GorgeousLooper.Instance().PostTask(() -> {
             HandleSegment(body);
         });
     }
@@ -130,6 +130,7 @@ public class NoiseHandshake {
     }
 
     void SendClientHello() {
+        GorgeousLooper.Instance().CheckThread();
         //1) 获取一个32 字节的公钥
         byte[] ephemeral_public_buf = NoiseJni.WriteMessage(noiseHandshakeState_, null);
         //2) 构造一个 client hello
@@ -148,6 +149,7 @@ public class NoiseHandshake {
     }
 
     void HandshakeXXFinish() {
+        GorgeousLooper.Instance().CheckThread();
         //1) 构造发送的payload
         byte[] payload = CreateFullPayload();
         //2) 加密数据
@@ -169,6 +171,7 @@ public class NoiseHandshake {
 
 
     void HandleXXServerHello(byte[] body) {
+        GorgeousLooper.Instance().CheckThread();
         try {
             DeviceEnv.HandshakeMessage serverHello = DeviceEnv.HandshakeMessage.parseFrom(body);
             if (!serverHello.hasServerHello()) {
@@ -223,6 +226,7 @@ public class NoiseHandshake {
     }
 
     void HandleIKServerHello(byte[] body) {
+        GorgeousLooper.Instance().CheckThread();
         try {
             DeviceEnv.HandshakeMessage serverHello = DeviceEnv.HandshakeMessage.parseFrom(body);
             if (!serverHello.hasServerHello()) {
@@ -249,6 +253,7 @@ public class NoiseHandshake {
     }
 
     void SendPayload() {
+        GorgeousLooper.Instance().CheckThread();
         //1) 构造payload
         byte[] payload = CreateFullPayload();
         //2) 加密 payload
@@ -330,13 +335,24 @@ public class NoiseHandshake {
     }
 
     public void StopNoiseHandShake() {
-        if (socketChannel_ != null) {
-            socketChannel_.close();
-        }
+        GorgeousLooper.Instance().PostTask(()->{
+            if (socketChannel_ != null) {
+                socketChannel_.close();
+                socketChannel_ = null;
+            }
+            receiveBuf_ = Unpooled.buffer();
+            if (noiseHandshakeState_ != 0) {
+                NoiseJni.DestroyInstance(noiseHandshakeState_);
+                noiseHandshakeState_ = 0;
+            }
+        });
     }
 
     public String SendNode (ProtocolTreeNode node) {
-        GorgeoesLooper.Instance().PostTask(()->{
+        GorgeousLooper.Instance().PostTask(()->{
+            if (0 == noiseHandshakeState_) {
+                return;
+            }
             try {
                 byte[] data = ProtocolNodeJni.XmlToBytes(node.toString());
                 byte[] cipherText = NoiseJni.Encrypt(noiseHandshakeState_, data);
@@ -355,9 +371,13 @@ public class NoiseHandshake {
         future.addListener(sendFuture -> {
             if (sendFuture.isSuccess()) {
                 if (!env_.hasServerStaticPublic() || env_.getServerStaticPublic() == null) {
-                    HandshakeXX();
+                    GorgeousLooper.Instance().PostTask(() -> {
+                        HandshakeXX();
+                    });
                 } else {
-                    HandshakeIK();
+                    GorgeousLooper.Instance().PostTask(() -> {
+                        HandshakeIK();
+                    });
                 }
             } else {
                 NotifyDisconnect(sendFuture.toString());
@@ -367,7 +387,8 @@ public class NoiseHandshake {
 
 
 
-    void HandshakeXX() throws InterruptedException, IOException {
+    void HandshakeXX() {
+        GorgeousLooper.Instance().CheckThread();
         Log.d(TAG, "start HandshakeXX");
         noiseHandshakeState_ = NoiseJni.CreateInstance();
         //开始握手
@@ -384,6 +405,7 @@ public class NoiseHandshake {
     }
 
     void HandshakeIK() {
+        GorgeousLooper.Instance().CheckThread();
         Log.d(TAG, "start HandshakeIK");
         noiseHandshakeState_ = NoiseJni.CreateInstance();
         NoiseJni.StartHandshakeIK(noiseHandshakeState_, env_.getClientStaticKeyPair().getStrPrivateKey().toByteArray(),env_.getClientStaticKeyPair().getStrPubKey().toByteArray(),env_.getServerStaticPublic().toByteArray());
@@ -404,7 +426,7 @@ public class NoiseHandshake {
     }
 
     void NotifyDisconnect(String detail) {
-        GorgeoesLooper.Instance().PostTask(()->{
+        GorgeousLooper.Instance().PostTask(()->{
             if (null != notify_) {
                 notify_.OnDisconnected(detail);
             }
@@ -412,8 +434,9 @@ public class NoiseHandshake {
     }
 
     void NotifyConnect() {
-        NoiseJni.Split(noiseHandshakeState_);
-        GorgeoesLooper.Instance().PostTask(()->{
+        GorgeousLooper.Instance().PostTask(()->{
+            GorgeousLooper.Instance().CheckThread();
+            NoiseJni.Split(noiseHandshakeState_);
             if (null != notify_) {
                 notify_.OnConnected(publicServerKey_);
             }
