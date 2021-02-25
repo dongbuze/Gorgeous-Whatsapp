@@ -1,12 +1,5 @@
 package ProtocolTree;
-
-import Util.StringUtil;
-import org.dom4j.*;
-import org.dom4j.io.SAXReader;
-
-import java.io.ByteArrayInputStream;
 import java.io.UnsupportedEncodingException;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class ProtocolTreeNode {
@@ -53,6 +46,29 @@ public class ProtocolTreeNode {
             }
         }
         return  results;
+    }
+
+    //@keep
+    public int GetAttributesCount() {
+        if (attributes_ != null) {
+            return attributes_.size();
+        }
+        return 0;
+    }
+    //@keep
+    public StanzaAttribute GetAttribute(int pos) {
+        return attributes_.get(pos);
+    }
+    //@keep
+    public int GetChildrenCount() {
+        if (children_ != null) {
+            return children_.size();
+        }
+        return 0;
+    }
+    //@keep
+    public ProtocolTreeNode GetChild(int pos) {
+        return children_.get(pos);
     }
 
     public ProtocolTreeNode GetChild(String name) {
@@ -129,79 +145,39 @@ public class ProtocolTreeNode {
         System.arraycopy(data, offset, data_, 0, len);
     }
 
-    static  ProtocolTreeNode InnerParseElement(Element element){
-        ProtocolTreeNode node = new ProtocolTreeNode(element.getName());
-        List<Attribute> attributes = element.attributes();
-        for( Attribute attribute : attributes) {
-            node.attributes_.add(new StanzaAttribute(attribute.getName(), attribute.getValue()));
-        }
-
-        String elementContent = element.getTextTrim();
-        if (!Util.StringUtil.isEmpty(elementContent)) {
-            node.SetData(Base64.getDecoder().decode(elementContent));
-        }
-
-        List<Element> childrenElements = element.elements();
-        for (Element childElement : childrenElements){
-            node.AddChild(InnerParseElement(childElement));
-        }
-
-        return node;
-    }
-
-    public static ProtocolTreeNode FromXml(String xml){
-        try {
-            SAXReader reader = new SAXReader();
-            Document document = reader.read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
-            Element root = document.getRootElement();
-            return InnerParseElement(root);
-        }
-        catch (Exception e){
-
-        }
-        return null;
-    }
-
-    static void  InnerToString(ProtocolTreeNode node, Branch parent) {
-        String namespace = null;
-        if (node.attributes_ != null) {
-            for (StanzaAttribute attribute : node.attributes_) {
-                if (attribute.key_.equals("xmlns")) {
-                    namespace = attribute.value_;
-                    break;
+    public String toString() {
+            StringBuilder sb = new StringBuilder("<");
+            sb.append(tag_);
+            if (attributes_ != null) {
+                for (StanzaAttribute attribute: attributes_) {
+                    sb.append(" ");
+                    sb.append(attribute.key_);
+                    sb.append("='");
+                    sb.append(attribute.value_);
+                    sb.append("'");
                 }
             }
-        }
-
-        Element element = null;
-        if (StringUtil.isEmpty(namespace)) {
-            element = parent.addElement(node.tag_);
-        } else {
-            element = parent.addElement(node.tag_, namespace);
-        }
-
-        if (node.data_ != null) {
-            element.setText(Base64.getEncoder().encodeToString(node.data_));
-        }
-        if (node.attributes_ != null) {
-            for (StanzaAttribute attribute : node.attributes_) {
-                element.addAttribute(attribute.key_, attribute.value_);
+            if (data_ == null && children_ == null) {
+                sb.append("/>");
+            } else {
+                sb.append(">");
+               if (children_ != null) {
+                   for (ProtocolTreeNode child : children_)
+                        sb.append(child.toString());
+                }
+                if (data_ != null) {
+                    try {
+                        sb.append(new String(data_, "UTF-8"));
+                    } catch (UnsupportedEncodingException e) {
+                    }
+                }
+                sb.append("</");
+                sb.append(tag_);
+                sb.append(">");
             }
+            return sb.toString();
+
         }
-
-        if (node.children_ != null) {
-            for (ProtocolTreeNode child : node.children_) {
-                InnerToString(child, element);
-            }
-        }
-    }
-
-    public String toString() {
-        Document document = DocumentHelper.createDocument();
-        InnerToString(this, document);
-
-        return  document.asXML();
-    }
 
     public void AddChild(ProtocolTreeNode child) {
         if (null == children_) {

@@ -57,6 +57,11 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         try {
             byte[] envBuffer =  axolotlManager_.GetBytesSetting("env");
             envBuilder_ = DeviceEnv.AndroidEnv.parseFrom(envBuffer).toBuilder();
+            Env.DeviceEnv.AppVersion.Builder useragentBuilder = envBuilder_.getUserAgentBuilder().getAppVersionBuilder();
+            useragentBuilder.setPrimary(2);
+            useragentBuilder.setSecondary(21);
+            useragentBuilder.setTertiary(3);
+            useragentBuilder.setQuaternary(20);
             noiseHandshake_ = new NoiseHandshake(this, proxy_);
             noiseHandshake_.StartNoiseHandShake( envBuilder_.build());
             return true;
@@ -202,7 +207,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             delegate_.OnLogin(0 , node);
         }
         LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
-        FlushKeys(unsentPreKeys);
+        FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
     }
 
     void HandleAeceipt(ProtocolTreeNode node) {
@@ -522,12 +527,12 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
 
     int DeAdjustId(byte[] data) {
         //转成16进制
-        String hex = StringUtil.bytesToHex(data);
+        String hex = StringUtil.BytesToHex(data);
         return new BigInteger(hex, 16).intValue();
     }
 
 
-    void  FlushKeys(List<PreKeyRecord> unsentPreKeys) {
+    void  FlushKeys(SignedPreKeyRecord signedPreKeyRecord, List<PreKeyRecord> unsentPreKeys) {
         StanzaAttribute[] attributes = new StanzaAttribute[4];
         attributes[0] = new StanzaAttribute("type", "set");
         attributes[1] = new StanzaAttribute("xmlns", "encrypt");
@@ -582,33 +587,25 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         {
             //signature  key skey
             ProtocolTreeNode skey = new ProtocolTreeNode("skey");
-            SignedPreKeyRecord signedPreKeyRecord =  axolotlManager_.LoadLatestSignedPreKey(false);
-            if (null != signedPreKeyRecord) {
-                {
-                    ProtocolTreeNode id = new ProtocolTreeNode("id");
-                    id.SetData(AdjustId(signedPreKeyRecord.getId()));
-                    skey.AddChild(id);
-                }
-                {
-                    ProtocolTreeNode value = new ProtocolTreeNode("value");
-                    value.SetData(signedPreKeyRecord.getKeyPair().getPublicKey().serialize(), 1, 32);
-                    skey.AddChild(value);
-                }
+            {
+                ProtocolTreeNode id = new ProtocolTreeNode("id");
+                id.SetData(AdjustId(signedPreKeyRecord.getId()));
+                skey.AddChild(id);
+            }
+            {
+                ProtocolTreeNode value = new ProtocolTreeNode("value");
+                value.SetData(signedPreKeyRecord.getKeyPair().getPublicKey().serialize(), 1, 32);
+                skey.AddChild(value);
+            }
 
-                {
-                    ProtocolTreeNode signature = new ProtocolTreeNode("signature");
-                    signature.SetData(signedPreKeyRecord.getSignature());
-                    skey.AddChild(signature);
-                }
+            {
+                ProtocolTreeNode signature = new ProtocolTreeNode("signature");
+                signature.SetData(signedPreKeyRecord.getSignature());
+                skey.AddChild(signature);
             }
             iqNode.AddChild(skey);
         }
-        AddTask(iqNode, new NodeCallback() {
-            @Override
-            public void Run(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
-                HandleFlushKey(srcNode,result);
-            }
-        });
+        AddTask(iqNode, (srcNode, result) -> HandleFlushKey(srcNode,result));
     }
 
     String AddTask(ProtocolTreeNode node, NodeCallback callback) {

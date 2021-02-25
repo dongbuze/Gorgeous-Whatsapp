@@ -278,10 +278,13 @@ public class NoiseHandshake {
     void HandleReceivePacket(byte[] body) {
         byte[] recvBuffer = NoiseJni.Decrypt(noiseHandshakeState_, body);
         if (recvBuffer.length > 0) {
-            ProtocolTreeNode node = ProtocolTreeNode.FromXml(ProtocolNodeJni.BytesToXml(recvBuffer));
+            ProtocolTreeNode node =  ProtocolNodeJni.Decode(recvBuffer);
+            Log.e(TAG, node.toString());
             if (null != notify_) {
                 notify_.OnPush(node);
             }
+        } else {
+            Log.e(TAG, "解密失败:" + body.length);
         }
     }
 
@@ -354,7 +357,7 @@ public class NoiseHandshake {
                 return;
             }
             try {
-                byte[] data = ProtocolNodeJni.XmlToBytes(node.toString());
+                byte[] data = ProtocolNodeJni.Encode(node);
                 byte[] cipherText = NoiseJni.Encrypt(noiseHandshakeState_, data);
                 WriteSegment(cipherText);
             }
@@ -419,7 +422,7 @@ public class NoiseHandshake {
     }
 
     ChannelFuture WriteSegment(byte[] data) {
-        ByteBuf buffer = Unpooled.buffer();
+        ByteBuf buffer = Unpooled.buffer(3 + data.length);
         buffer.writeBytes(HandshakeUtil.GenerateDataHead(data.length));
         buffer.writeBytes(data);
         return socketChannel_.writeAndFlush(buffer);
@@ -435,8 +438,8 @@ public class NoiseHandshake {
 
     void NotifyConnect() {
         GorgeousLooper.Instance().PostTask(()->{
-            GorgeousLooper.Instance().CheckThread();
-            NoiseJni.Split(noiseHandshakeState_);
+        GorgeousLooper.Instance().CheckThread();
+        NoiseJni.Split(noiseHandshakeState_);
             if (null != notify_) {
                 notify_.OnConnected(publicServerKey_);
             }
