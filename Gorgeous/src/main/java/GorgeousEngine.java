@@ -18,9 +18,9 @@ import org.whispersystems.libsignal.state.SignedPreKeyRecord;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     public interface GorgeousEngineDelegate {
@@ -87,6 +87,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     NoiseHandshake.Proxy proxy_;
     AxolotlManager axolotlManager_;
     DeviceEnv.AndroidEnv.Builder envBuilder_;
+    Timer pingTimer_;
 
     @Override
     public void OnConnected(byte[] serverPublicKey) {
@@ -103,6 +104,9 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     public void OnDisconnected(String desc) {
         if (null != delegate_) {
             delegate_.OnDisconnect(desc);
+        }
+        if (null != pingTimer_) {
+            pingTimer_.cancel();
         }
     }
 
@@ -206,8 +210,41 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         if (null != delegate_) {
             delegate_.OnLogin(0 , node);
         }
-        LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
-        FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
+        GetCdnInfo();
+        //LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
+        //FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
+        pingTimer_ = new Timer();
+        pingTimer_.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                ProtocolTreeNode ping = new ProtocolTreeNode("iq");
+                ping.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
+                ping.AddAttribute(new StanzaAttribute("xmlns", "w:p"));
+                ping.AddAttribute(new StanzaAttribute("type", "get"));
+                ping.AddAttribute(new StanzaAttribute("to", "s.whatsapp.net"));
+                ping.AddChild(new ProtocolTreeNode("ping"));
+                AddTask(ping);
+            }
+        }, 100, 4 * 60 *1000);
+        {
+            //available
+            ProtocolTreeNode available = new ProtocolTreeNode("presence");
+            available.AddAttribute(new StanzaAttribute("type", "available"));
+            AddTask(available);
+        }
+    }
+
+    void GetCdnInfo() {
+        ProtocolTreeNode cdnNode = new ProtocolTreeNode("iq");
+        cdnNode.AddAttribute(new StanzaAttribute("to", "s.whatsapp.net"));
+        cdnNode.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
+        cdnNode.AddAttribute(new StanzaAttribute("xmlns", "w:m"));
+        cdnNode.AddAttribute(new StanzaAttribute("type", "set"));
+
+
+        ProtocolTreeNode media = new ProtocolTreeNode("media_conn");
+        cdnNode.AddChild(media);
+        AddTask(cdnNode);
     }
 
     void HandleAeceipt(ProtocolTreeNode node) {
@@ -358,7 +395,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         iq.AddAttribute(new StanzaAttribute("xmlns", "encrypt"));
         iq.AddAttribute(new StanzaAttribute("type", "get"));
         iq.AddAttribute(new StanzaAttribute("to", "s.whatsapp.net"));
-        iq.AddAttribute(new StanzaAttribute("id", StringUtil.GenerateIqId()));
+        iq.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
 
         ProtocolTreeNode key = new ProtocolTreeNode("key");
         for (String jid: jids) {
@@ -504,6 +541,19 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             //List<PreKeyRecord> records = axolotlManager_.GetPreKeyStore().generatePreKey();
             //FlushKeys(records);
         }
+
+        ProtocolTreeNode ack = new ProtocolTreeNode("ack");
+        ack.AddAttribute(new StanzaAttribute("id", node.GetAttributeValue("id")));
+        ack.AddAttribute(new StanzaAttribute("class", "notification"));
+        ack.AddAttribute(new StanzaAttribute("to", node.GetAttributeValue("from")));
+        if (!StringUtil.isEmpty(type)) {
+            ack.AddAttribute(new StanzaAttribute("type", type));
+        }
+        String participant = node.GetAttributeValue("participant");
+        if (!StringUtil.isEmpty(participant)) {
+            ack.AddAttribute(new StanzaAttribute("participant", participant));
+        }
+        AddTask(ack);
     }
 
     byte[] AdjustId(int id) {
@@ -537,7 +587,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         attributes[0] = new StanzaAttribute("type", "set");
         attributes[1] = new StanzaAttribute("xmlns", "encrypt");
         attributes[2] = new StanzaAttribute("to", "s.whatsapp.net");
-        attributes[3] = new StanzaAttribute("id", StringUtil.GenerateIqId());
+        attributes[3] = new StanzaAttribute("id", GenerateIqId());
         ProtocolTreeNode iqNode = new ProtocolTreeNode("iq", attributes);
         {
             // prekey 节点
@@ -668,7 +718,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             return SendToContact(jid, serialData, messageType, mediaType, iqId);
         } else {
             if (StringUtil.isEmpty(iqId)) {
-                iqId = StringUtil.GenerateIqId();
+                iqId = GenerateIqId();
             }
             LinkedList<String> jids = new LinkedList<>();
             jids.add(jid);
@@ -714,7 +764,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     String SendEncMessage(String jid, byte[] cipherText, int encType, String messageType, String mediaType, String iqId) {
         ProtocolTreeNode msg = new ProtocolTreeNode("message");
         if (StringUtil.isEmpty(iqId)) {
-            iqId = StringUtil.GenerateIqId();
+            iqId = GenerateIqId();
         }
         msg.AddAttribute(new StanzaAttribute("id", iqId));
         msg.AddAttribute(new StanzaAttribute("type", messageType));
@@ -748,4 +798,9 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     private GorgeousEngineDelegate delegate_ = null;
+    String GenerateIqId() {
+        return String.format("%s:%d", idPrex_, iqidIndex_.incrementAndGet());
+    }
+    String idPrex_ = UUID.randomUUID().toString().replaceAll("-", "").substring(0,28);
+    AtomicInteger iqidIndex_ = new AtomicInteger(0);
 }

@@ -59,9 +59,4 @@ public class StringUtil {
         }
         return result;
     }
-
-
-    public static String GenerateIqId() {
-        return UUID.randomUUID().toString().replaceAll("-", "");
-    }
 }
