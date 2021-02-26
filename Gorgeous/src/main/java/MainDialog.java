@@ -9,6 +9,7 @@ import org.whispersystems.libsignal.logging.SignalProtocolLoggerProvider;
 import javax.swing.*;
 import java.awt.event.*;
 import java.net.*;
+import java.util.Date;
 
 public class MainDialog extends JDialog implements SignalProtocolLogger, GorgeousEngine.GorgeousEngineDelegate {
     private static final String TAG = MainDialog.class.getSimpleName();
@@ -29,7 +30,12 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeou
 
         setLocationRelativeTo(null);
         SignalProtocolLoggerProvider.setProvider(this);
-        System.load(System.getProperty("user.dir") + "\\jni\\libNoiseJni.dll");
+        String os = System.getProperty("os.name");
+        if (os.startsWith("Linux")) {
+            System.load(System.getProperty("user.dir") + "/jni/libNoiseJni.so");
+        } else if (os.startsWith("Windows")) {
+            System.load(System.getProperty("user.dir") + "\\jni\\libNoiseJni.dll");
+        }
 
         long instance = NoiseJni.CreateInstance();
         NoiseJni.DestroyInstance(instance);
@@ -104,7 +110,7 @@ public class MainDialog extends JDialog implements SignalProtocolLogger, Gorgeou
 
     @Override
     public void log(int priority, String tag, String message) {
-        System.out.println(message);
+        System.out.println(new Date().toString() +  message);
     }
 
     @Override

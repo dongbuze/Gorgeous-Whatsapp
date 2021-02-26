@@ -99,7 +99,6 @@ public class ProtocolTreeNode {
                 this.attributes_.add(attributes[i]);
             }
         }
-
         this.data_ = data;
     }
 

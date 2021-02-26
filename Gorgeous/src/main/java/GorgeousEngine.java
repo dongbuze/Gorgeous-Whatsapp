@@ -206,6 +206,16 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         }
     }
 
+    void SendPing() {
+        ProtocolTreeNode ping = new ProtocolTreeNode("iq");
+        ping.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
+        ping.AddAttribute(new StanzaAttribute("xmlns", "w:p"));
+        ping.AddAttribute(new StanzaAttribute("type", "get"));
+        ping.AddAttribute(new StanzaAttribute("to", "s.whatsapp.net"));
+        ping.AddChild(new ProtocolTreeNode("ping"));
+        AddTask(ping);
+    }
+
     void HandleSuccess(ProtocolTreeNode node) {
         if (null != delegate_) {
             delegate_.OnLogin(0 , node);
@@ -217,13 +227,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         pingTimer_.schedule(new TimerTask() {
             @Override
             public void run() {
-                ProtocolTreeNode ping = new ProtocolTreeNode("iq");
-                ping.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
-                ping.AddAttribute(new StanzaAttribute("xmlns", "w:p"));
-                ping.AddAttribute(new StanzaAttribute("type", "get"));
-                ping.AddAttribute(new StanzaAttribute("to", "s.whatsapp.net"));
-                ping.AddChild(new ProtocolTreeNode("ping"));
-                AddTask(ping);
+                SendPing();
             }
         }, 100, 4 * 60 *1000);
         {
@@ -244,7 +248,26 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
 
         ProtocolTreeNode media = new ProtocolTreeNode("media_conn");
         cdnNode.AddChild(media);
-        AddTask(cdnNode);
+        AddTask(cdnNode, (srcNode, result) -> {
+            String type = result.GetAttributeValue("type");
+            if (!type.equals("result")) {
+                Log.e(TAG, "cdn 失败:" + result.toString());
+                return;
+            }
+            ProtocolTreeNode media_conn = result.GetChild("media_conn");
+            if (null == media_conn) {
+                Log.e(TAG, "media_conn 节点:" + result.toString());
+                return;
+            }
+            cdnAuthKey_ = media_conn.GetAttributeValue("auth");
+            LinkedList<ProtocolTreeNode> children = media_conn.GetChildren();
+            for (ProtocolTreeNode child : children) {
+                if (child.GetAttribute("type").equals("primary")) {
+                    cdnHost_ = child.GetAttributeValue("hostname");
+                    break;
+                }
+            }
+        });
     }
 
     void HandleAeceipt(ProtocolTreeNode node) {
@@ -803,4 +826,6 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
     String idPrex_ = UUID.randomUUID().toString().replaceAll("-", "").substring(0,28);
     AtomicInteger iqidIndex_ = new AtomicInteger(0);
+    String cdnAuthKey_;
+    String cdnHost_;
 }
