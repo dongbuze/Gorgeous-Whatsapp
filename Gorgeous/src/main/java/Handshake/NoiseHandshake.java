@@ -63,25 +63,27 @@ public class NoiseHandshake {
 
     void OnChannelRead(ChannelHandlerContext ctx, Object msg) {
         receiveBuf_.writeBytes((ByteBuf)msg);
-        int readableBytes = receiveBuf_.readableBytes();
-        if (readableBytes < 3) {
-            //是否接收完头部数据
-            return;
+        while (true) {
+            int readableBytes = receiveBuf_.readableBytes();
+            if (readableBytes < 3) {
+                //是否接收完头部数据
+                return;
+            }
+            byte[] lenBuffer = new byte[3];
+            receiveBuf_.getBytes(0, lenBuffer);
+            int bodyLen = HandshakeUtil.BodyBytesToLen(lenBuffer);
+            if (readableBytes < 3 + bodyLen) {
+                //判断是否接收完body
+                return;
+            }
+            byte[] body = new byte[bodyLen];
+            receiveBuf_.skipBytes(3);
+            receiveBuf_.readBytes(body);
+            receiveBuf_.discardReadBytes();
+            GorgeousLooper.Instance().PostTask(() -> {
+                HandleSegment(body);
+            });
         }
-        byte[] lenBuffer = new byte[3];
-        receiveBuf_.getBytes(0, lenBuffer);
-        int bodyLen = HandshakeUtil.BodyBytesToLen(lenBuffer);
-        if (readableBytes < 3 + bodyLen) {
-            //判断是否接收完body
-            return;
-        }
-        byte[] body = new byte[bodyLen];
-        receiveBuf_.skipBytes(3);
-        receiveBuf_.readBytes(body);
-        receiveBuf_.discardReadBytes();
-        GorgeousLooper.Instance().PostTask(() -> {
-            HandleSegment(body);
-        });
     }
 
 

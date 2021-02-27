@@ -220,9 +220,10 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         if (null != delegate_) {
             delegate_.OnLogin(0 , node);
         }
+
         GetCdnInfo();
         //LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
-        //FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
+       //FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
         pingTimer_ = new Timer();
         pingTimer_.schedule(new TimerTask() {
             @Override
@@ -236,6 +237,19 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             available.AddAttribute(new StanzaAttribute("type", "available"));
             AddTask(available);
         }
+    }
+
+    void Test() {
+        ProtocolTreeNode available = new ProtocolTreeNode("presence");
+        available.AddAttribute(new StanzaAttribute("type", "available"));
+        AddTask(available);
+    }
+
+    String SendText(String jid, String content) {
+        //序列化数据
+        WhatsMessage.WhatsAppMessage.Builder builder = WhatsMessage.WhatsAppMessage.newBuilder();
+        builder.setConversation(content);
+        return SendSerialData(jid, builder.build().toByteArray(), "text", "", "");
     }
 
     void GetCdnInfo() {
@@ -262,7 +276,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             cdnAuthKey_ = media_conn.GetAttributeValue("auth");
             LinkedList<ProtocolTreeNode> children = media_conn.GetChildren();
             for (ProtocolTreeNode child : children) {
-                if (child.GetAttribute("type").equals("primary")) {
+                if (child.GetAttributeValue("type").equals("primary")) {
                     cdnHost_ = child.GetAttributeValue("hostname");
                     break;
                 }
@@ -747,12 +761,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             jids.add(jid);
             String finalJid = jid;
             String finalIqId = iqId;
-            GetKeysFor(jids, new NodeCallback() {
-                @Override
-                public void Run(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
-                    SendToContact(finalJid, serialData,messageType, mediaType, finalIqId);
-                }
-            });
+            GetKeysFor(jids, (srcNode, result) -> SendToContact(finalJid, serialData,messageType, mediaType, finalIqId));
             return iqId;
         }
     }
