@@ -3,6 +3,7 @@ import Handshake.NoiseHandshake;
 import Message.WhatsMessage;
 import ProtocolTree.ProtocolTreeNode;
 import ProtocolTree.StanzaAttribute;
+import Util.GorgeousLooper;
 import Util.StringUtil;
 import axolotl.AxolotlManager;
 import com.google.protobuf.ByteString;
@@ -243,10 +244,14 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     public String SendText(String jid, String content) {
-        //序列化数据
+        String id = GenerateIqId();
+        GorgeousLooper.Instance().PostTask(() -> {
         WhatsMessage.WhatsAppMessage.Builder builder = WhatsMessage.WhatsAppMessage.newBuilder();
         builder.setConversation(content);
-        return SendSerialData(jid, builder.build().toByteArray(), "text", "", "");
+            SendSerialData(jid, builder.build().toByteArray(), "text", "", id);
+        });
+        //序列化数据
+        return id;
     }
 
     void GetCdnInfo() {
@@ -458,9 +463,13 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
          Integer count = retries_.get(iqid);
          if (count == null) {
              count = new Integer(1);
-             retries_.put(iqid, count);
          } else {
              count++;
+         }
+         retries_.put(iqid, count);
+         if (count >= 3) {
+             retries_.remove(iqid);
+             return;
          }
          ProtocolTreeNode receipt = new ProtocolTreeNode("receipt");
          receipt.AddAttribute(new StanzaAttribute("id", iqid));
@@ -699,7 +708,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         {
             //type
             ProtocolTreeNode type = new ProtocolTreeNode("type");
-            type.SetData("5".getBytes(StandardCharsets.UTF_8));
+            type.SetData(new byte[]{5});
             iqNode.AddChild(type);
         }
         {
