@@ -191,7 +191,7 @@ public class AxolotlManager {
 
     public List<PreKeyRecord> LevelPreKeys(boolean force) {
         int count =  preKeyStore_.getPendingPreKeysCount();
-        if (force || count < 10) {
+        if (count < 10) {
             int maxId = preKeyStore_.getMaxPreKeyId();
             return preKeyStore_.generatePreKeyAndStore(maxId, 812);
         }

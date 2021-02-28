@@ -3,6 +3,7 @@ package Handshake;
 import Env.DeviceEnv;
 import ProtocolTree.ProtocolTreeNode;
 import Util.GorgeousLooper;
+import Util.StringUtil;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.netty.bootstrap.Bootstrap;
@@ -283,12 +284,16 @@ public class NoiseHandshake {
         byte[] recvBuffer = NoiseJni.Decrypt(noiseHandshakeState_, body);
         if (recvBuffer.length > 0) {
             ProtocolTreeNode node =  ProtocolNodeJni.Decode(recvBuffer);
-            Log.e(TAG, node.toString());
+            if (null == node) {
+                Log.e("接收:", "decode失败:" + StringUtil.BytesToHex(recvBuffer));
+            } else {
+                Log.e("接收:", node.toString());
             if (null != notify_) {
                 notify_.OnPush(node);
             }
+            }
         } else {
-            Log.e(TAG, "解密失败:" + body.length);
+            Log.e("接收:", "解密失败:" + body.length);
         }
     }
 

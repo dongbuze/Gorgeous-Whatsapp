@@ -11,9 +11,10 @@ public class GorgeousLooper {
                 try {
                     Runnable runnable = tasks_.take();
                     runnable.run();
+                } catch (InterruptedException e) {
+                    break;
                 }
-                catch (Exception e){
-                }
+
             }
         });
         runnableThread_.start();

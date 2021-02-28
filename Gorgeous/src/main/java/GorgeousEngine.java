@@ -6,6 +6,7 @@ import ProtocolTree.StanzaAttribute;
 import Util.StringUtil;
 import axolotl.AxolotlManager;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import org.whispersystems.libsignal.*;
 import org.whispersystems.libsignal.ecc.Curve;
 import org.whispersystems.libsignal.ecc.ECPublicKey;
@@ -97,7 +98,6 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             envBuilder_.clearServerStaticPublic();
         }
         axolotlManager_.SetBytesSetting("env", envBuilder_.build().toByteArray());
-        axolotlManager_.LevelPreKeys(false);
     }
 
     @Override
@@ -222,8 +222,6 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         }
 
         GetCdnInfo();
-        //LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
-       //FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
         pingTimer_ = new Timer();
         pingTimer_.schedule(new TimerTask() {
             @Override
@@ -240,12 +238,11 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     void Test() {
-        ProtocolTreeNode available = new ProtocolTreeNode("presence");
-        available.AddAttribute(new StanzaAttribute("type", "available"));
-        AddTask(available);
+        LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
+        FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
     }
 
-    String SendText(String jid, String content) {
+    public String SendText(String jid, String content) {
         //序列化数据
         WhatsMessage.WhatsAppMessage.Builder builder = WhatsMessage.WhatsAppMessage.newBuilder();
         builder.setConversation(content);
@@ -377,6 +374,14 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         return null;
     }
 
+
+    byte[] CombineDecodePoint(byte[] buffer) {
+        byte[] result = new byte[buffer.length + 1];
+        result[0] = 5;
+        System.arraycopy(buffer, 0, result, 1, buffer.length);
+        return result;
+    }
+
     class HandleGetKeysFor implements  NodeCallback{
         NodeCallback resultCallback_;
         HandleGetKeysFor(NodeCallback resultCallback) {
@@ -403,15 +408,19 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
                      ProtocolTreeNode registration = user.GetChild("registration");
                     //pre key
                     ProtocolTreeNode preKeyNode = user.GetChild("key");
-                    ECPublicKey preKeyPublic = Curve.decodePoint(preKeyNode.GetChild("value").GetData(), 0);
+                    if (null == preKeyNode) {
+                        Log.e(TAG, "没有获取到 prekey:" + user.toString());
+                        continue;
+                    }
+                    ECPublicKey preKeyPublic = Curve.decodePoint(CombineDecodePoint(preKeyNode.GetChild("value").GetData()), 0);
 
                     //skey
                     ProtocolTreeNode skey = user.GetChild("skey");
-                    ECPublicKey signedPreKeyPub = Curve.decodePoint(skey.GetChild("value").GetData(), 0);
+                    ECPublicKey signedPreKeyPub = Curve.decodePoint(CombineDecodePoint(skey.GetChild("value").GetData()), 0);
 
                     //identity
                     ProtocolTreeNode identity = user.GetChild("identity");
-                    IdentityKey identityKey = new IdentityKey(Curve.decodePoint(identity.GetData(),0));
+                    IdentityKey identityKey = new IdentityKey(Curve.decodePoint(CombineDecodePoint(identity.GetData()),0));
 
                     PreKeyBundle preKeyBundle = new PreKeyBundle(DeAdjustId(registration.GetData()),0,DeAdjustId(preKeyNode.GetChild("id").GetData()),preKeyPublic,
                             DeAdjustId(skey.GetChild("id").GetData()),signedPreKeyPub,skey.GetChild("signature").GetData(),identityKey);
@@ -457,7 +466,10 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
          receipt.AddAttribute(new StanzaAttribute("id", iqid));
         receipt.AddAttribute(new StanzaAttribute("to", node.GetAttributeValue("from")));
         receipt.AddAttribute(new StanzaAttribute("type", "retry"));
-        receipt.AddAttribute(new StanzaAttribute("participant", node.GetAttributeValue("participant")));
+        String participant = node.GetAttributeValue("participant");
+        if (!StringUtil.isEmpty(participant)) {
+            receipt.AddAttribute(new StanzaAttribute("participant", participant));
+        }
         receipt.AddAttribute(new StanzaAttribute("t", node.GetAttributeValue("t")));
 
         //retry
@@ -541,9 +553,17 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             jidList.add(senderJid);
             GetKeysFor(jidList, new HandlePendingMessage(node));
             e.printStackTrace();
+        } catch (Exception e) {
+            Log.e(TAG, e.getLocalizedMessage());
         }
-        if (plainText != null) {
 
+        if (plainText != null) {
+            try {
+                WhatsMessage.WhatsAppMessage msg = WhatsMessage.WhatsAppMessage.parseFrom(plainText);
+                Log.d(TAG, "接收消息:" + msg.toString());
+            } catch (InvalidProtocolBufferException e) {
+                e.printStackTrace();
+            }
         }
 
         {
@@ -572,11 +592,10 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         if (type.equals("encrypt")) {
             ProtocolTreeNode child = node.GetChild("count");
             if (child != null) {
-
+                axolotlManager_.LevelPreKeys(true);
+                LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
+                FlushKeys(axolotlManager_.LoadLatestSignedPreKey(false),  unsentPreKeys);
             }
-
-            //List<PreKeyRecord> records = axolotlManager_.GetPreKeyStore().generatePreKey();
-            //FlushKeys(records);
         }
 
         ProtocolTreeNode ack = new ProtocolTreeNode("ack");
@@ -591,7 +610,44 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             ack.AddAttribute(new StanzaAttribute("participant", participant));
         }
         AddTask(ack);
+        if (null != delegate_) {
+            delegate_.OnSync(node);
+        }
     }
+
+
+    class HandleResult implements NodeCallback{
+        String type_;
+        HandleResult(String type) {
+            type_ = type;
+        }
+        @Override
+        public void Run(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
+            if (null != delegate_) {
+                delegate_.OnPacketResponse(type_, result);
+            }
+    }
+    }
+
+    public String CreateGroup(String subjectName, List<String> members) {
+        ProtocolTreeNode node = new ProtocolTreeNode("iq");
+        node.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
+        node.AddAttribute(new StanzaAttribute("xmlns", "w:g2"));
+        node.AddAttribute(new StanzaAttribute("type", "set"));
+        node.AddAttribute(new StanzaAttribute("to", "g.us"));
+
+        ProtocolTreeNode create = new ProtocolTreeNode("create");
+        create.AddAttribute(new StanzaAttribute("subject", subjectName));
+        for (String member : members) {
+            ProtocolTreeNode participant = new ProtocolTreeNode("participant");
+            participant.AddAttribute(new StanzaAttribute("jid", JidNormalize(member)));
+            create.AddChild(participant);
+        }
+        node.AddChild(create);
+
+        return AddTask(node, new HandleResult("creategroup"));
+    }
+
 
     byte[] AdjustId(int id) {
         String hex = Integer.toHexString(id);
@@ -621,11 +677,31 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
 
     void  FlushKeys(SignedPreKeyRecord signedPreKeyRecord, List<PreKeyRecord> unsentPreKeys) {
         StanzaAttribute[] attributes = new StanzaAttribute[4];
-        attributes[0] = new StanzaAttribute("type", "set");
+        attributes[0] = new StanzaAttribute("id", GenerateIqId());
         attributes[1] = new StanzaAttribute("xmlns", "encrypt");
-        attributes[2] = new StanzaAttribute("to", "s.whatsapp.net");
-        attributes[3] = new StanzaAttribute("id", GenerateIqId());
+        attributes[2] = new StanzaAttribute("type", "set");
+        attributes[3] = new StanzaAttribute("to", "s.whatsapp.net");
         ProtocolTreeNode iqNode = new ProtocolTreeNode("iq", attributes);
+        {
+            //identify
+            ProtocolTreeNode identity = new ProtocolTreeNode("identity");
+            identity.SetData(axolotlManager_.GetIdentityKeyPair().getPublicKey().serialize(), 1, 32);
+            iqNode.AddChild(identity);
+        }
+
+        {
+            //registration
+            ProtocolTreeNode registration = new ProtocolTreeNode("registration");
+            registration.SetData(AdjustId(axolotlManager_.getLocalRegistrationId()));
+            iqNode.AddChild(registration);
+        }
+
+        {
+            //type
+            ProtocolTreeNode type = new ProtocolTreeNode("type");
+            type.SetData("5".getBytes(StandardCharsets.UTF_8));
+            iqNode.AddChild(type);
+        }
         {
             // prekey 节点
             ProtocolTreeNode list = new ProtocolTreeNode("list");
@@ -648,27 +724,6 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
             }
             iqNode.AddChild(list);
             iqNode.SetCustomParams(sentPrekeyIds);
-        }
-
-        {
-            //identify
-            ProtocolTreeNode identity = new ProtocolTreeNode("identity");
-            identity.SetData(axolotlManager_.GetIdentityKeyPair().getPublicKey().serialize(), 1, 32);
-            iqNode.AddChild(identity);
-        }
-
-        {
-            //registration
-            ProtocolTreeNode registration = new ProtocolTreeNode("registration");
-            registration.SetData(AdjustId(axolotlManager_.getLocalRegistrationId()));
-            iqNode.AddChild(registration);
-        }
-
-        {
-            //type
-            ProtocolTreeNode type = new ProtocolTreeNode("type");
-            type.SetData("5".getBytes(StandardCharsets.UTF_8));
-            iqNode.AddChild(type);
         }
 
         {

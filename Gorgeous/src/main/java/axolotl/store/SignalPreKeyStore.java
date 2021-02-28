@@ -71,7 +71,7 @@ public class SignalPreKeyStore implements PreKeyStore {
 
     public int getPendingPreKeysCount() {
         try {
-            PreparedStatement preparedStatement = axolotlManager_.GetPreparedStatement("SELECT count(*) FROM prekeys");
+            PreparedStatement preparedStatement = axolotlManager_.GetPreparedStatement("SELECT count(*) FROM prekeys WHERE sent_to_server is NULL or sent_to_server = 0");
             ResultSet rs = preparedStatement.executeQuery();
             if (rs.next()) {
                 return rs.getInt(1);

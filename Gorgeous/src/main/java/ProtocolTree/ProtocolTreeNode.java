@@ -165,10 +165,7 @@ public class ProtocolTreeNode {
                         sb.append(child.toString());
                 }
                 if (data_ != null) {
-                    try {
-                        sb.append(new String(data_, "UTF-8"));
-                    } catch (UnsupportedEncodingException e) {
-                    }
+                    sb.append(Base64.getEncoder().encodeToString(data_));
                 }
                 sb.append("</");
                 sb.append(tag_);
