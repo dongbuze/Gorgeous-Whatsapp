@@ -244,10 +244,10 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     public String SendText(String jid, String content) {
-        String id = GenerateIqId();
-        GorgeousLooper.Instance().PostTask(() -> {
-        WhatsMessage.WhatsAppMessage.Builder builder = WhatsMessage.WhatsAppMessage.newBuilder();
-        builder.setConversation(content);
+            String id = GenerateIqId();
+            GorgeousLooper.Instance().PostTask(() -> {
+            WhatsMessage.WhatsAppMessage.Builder builder = WhatsMessage.WhatsAppMessage.newBuilder();
+            builder.setConversation(content);
             SendSerialData(jid, builder.build().toByteArray(), "text", "", id);
         });
         //序列化数据
@@ -526,11 +526,11 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         try {
             ProtocolTreeNode pkMsgEncNode = GetEncNode(encNodes, "pkmsg");
             if (pkMsgEncNode != null) {
-                HandlePreKeyWhisperMessage(recepid, pkMsgEncNode);
+                plainText = HandlePreKeyWhisperMessage(recepid, pkMsgEncNode);
             } else {
                 ProtocolTreeNode whisperEncNode = GetEncNode(encNodes, "msg");
                 if (whisperEncNode != null) {
-                    HandleWhisperMessage(recepid, whisperEncNode);
+                    plainText = HandleWhisperMessage(recepid, whisperEncNode);
                 }
             }
 
@@ -869,6 +869,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
 
         //enc node
         ProtocolTreeNode encNode = new ProtocolTreeNode("enc");
+        encNode.AddAttribute(new StanzaAttribute("v", "2"));
         encNode.SetData(cipherText);
         if (!StringUtil.isEmpty(mediaType)) {
             encNode.AddAttribute(new StanzaAttribute("mediatype", mediaType));

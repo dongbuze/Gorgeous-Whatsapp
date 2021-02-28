@@ -40,6 +40,7 @@ public class AxolotlManager {
     GroupSessionBuilder groupSessionBuilder_;
     String userName_;
 
+    static final int COUNT_GEN_PREKEYS = 812;
 
     public AxolotlManager(String dbPath) {
         try{
@@ -189,13 +190,16 @@ public class AxolotlManager {
         }
     }
 
-    public List<PreKeyRecord> LevelPreKeys(boolean force) {
+    public void LevelPreKeys(boolean force) {
         int count =  preKeyStore_.getPendingPreKeysCount();
-        if (count < 10) {
+        if (count < 10 || force) {
+            int unsent = preKeyStore_.GetUnsentCount();
+            if (unsent == COUNT_GEN_PREKEYS) {
+                return ;
+            }
             int maxId = preKeyStore_.getMaxPreKeyId();
-            return preKeyStore_.generatePreKeyAndStore(maxId, 812);
+            preKeyStore_.generatePreKeyAndStore(maxId, COUNT_GEN_PREKEYS);
         }
-        return null;
     }
 
     public void SetBytesSetting(String key, byte[] value) {

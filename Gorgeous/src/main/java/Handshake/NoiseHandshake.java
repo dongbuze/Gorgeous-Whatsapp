@@ -14,8 +14,6 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.proxy.Socks5ProxyHandler;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
 import jni.NoiseJni;
 import jni.ProtocolNodeJni;
 import org.squirrelframework.foundation.fsm.StateMachineBuilderFactory;
@@ -301,7 +299,6 @@ public class NoiseHandshake {
     static final String TAG = NoiseHandshake.class.getSimpleName();
     ByteBuf receiveBuf_ = Unpooled.buffer();
     Channel socketChannel_;
-    Bootstrap bootstrap_;
     HandshakeNotify notify_;
     Proxy proxy_;
     long noiseHandshakeState_ = 0;
@@ -318,8 +315,8 @@ public class NoiseHandshake {
     public void StartNoiseHandShake(Env.DeviceEnv.AndroidEnv env) {
         String server = HandshakeConfig.s_server[new Random().nextInt(HandshakeConfig.s_server.length)];
         Log.i(TAG, "选择服务器:" + server);
-        bootstrap_ = new Bootstrap();
-        bootstrap_.group(eventGroup_)
+        Bootstrap bootstrap = new Bootstrap();
+        bootstrap.group(eventGroup_)
                 .channel(NioSocketChannel.class)
                 .handler(new ChannelInitializer<SocketChannel>() {
                     @Override
@@ -330,7 +327,7 @@ public class NoiseHandshake {
                         ch.pipeline().addLast(new ClientHandler());
                     }
                 });
-        ChannelFuture future = bootstrap_.connect(server, 443);
+        ChannelFuture future = bootstrap.connect(server, 443);
         //ChannelFuture future = bootstrap.connect("127.0.0.1", 18001);
         future.addListener(connectFuture -> {
             if (connectFuture.isSuccess()) {
@@ -364,6 +361,7 @@ public class NoiseHandshake {
     public String SendNode (ProtocolTreeNode node) {
         GorgeousLooper.Instance().PostTask(()->{
             if (0 == noiseHandshakeState_) {
+                Log.e(TAG, "noiseHandshakeState_ null");
                 return;
             }
             try {
@@ -448,9 +446,9 @@ public class NoiseHandshake {
     }
 
     void NotifyConnect() {
+        NoiseJni.Split(noiseHandshakeState_);
         GorgeousLooper.Instance().PostTask(()->{
         GorgeousLooper.Instance().CheckThread();
-        NoiseJni.Split(noiseHandshakeState_);
             if (null != notify_) {
                 notify_.OnConnected(publicServerKey_);
             }

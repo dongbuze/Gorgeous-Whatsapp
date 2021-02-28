@@ -40,6 +40,9 @@ public class ProtocolTreeNode {
 
     public LinkedList<ProtocolTreeNode> GetChildren(String name) {
         LinkedList<ProtocolTreeNode> results = new LinkedList<>();
+        if (null == children_) {
+            return  results;
+        }
         for (ProtocolTreeNode child : children_) {
             if (child.GetTag().equals(name)) {
                 results.add(child);
