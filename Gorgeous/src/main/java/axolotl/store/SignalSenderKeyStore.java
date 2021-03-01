@@ -49,6 +49,6 @@ public class SignalSenderKeyStore implements SenderKeyStore {
         catch (Exception e){
             Log.e(TAG, e.getMessage());
         }
-        return null;
+        return new SenderKeyRecord();
     }
 }

@@ -14,12 +14,12 @@ import org.whispersystems.libsignal.ecc.ECPublicKey;
 import org.whispersystems.libsignal.groups.state.SenderKeyRecord;
 import org.whispersystems.libsignal.logging.Log;
 import org.whispersystems.libsignal.protocol.CiphertextMessage;
+import org.whispersystems.libsignal.protocol.SenderKeyDistributionMessage;
 import org.whispersystems.libsignal.state.PreKeyBundle;
 import org.whispersystems.libsignal.state.PreKeyRecord;
 import org.whispersystems.libsignal.state.SignedPreKeyRecord;
 
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -239,8 +239,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     void Test() {
-        LinkedList<PreKeyRecord>  unsentPreKeys = axolotlManager_.LoadUnSendPreKey();
-        FlushKeys(axolotlManager_.LoadLatestSignedPreKey(true),  unsentPreKeys);
+        SendPing();
     }
 
     public String SendText(String jid, String content) {
@@ -536,7 +535,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
 
             ProtocolTreeNode skMsgEncNode = GetEncNode(encNodes, "skmsg");
             if (skMsgEncNode != null) {
-                HandleSenderKeyMessage(recepid, node);
+                plainText = HandleSenderKeyMessage(recepid, node);
             }
 
             retries_.remove(node.IqId());
@@ -760,7 +759,9 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     String AddTask(ProtocolTreeNode node, NodeCallback callback) {
-        registerHandleMap_.put(node.IqId(), new NodeHandleInfo(callback, node));
+        if (null != callback) {
+            registerHandleMap_.put(node.IqId(), new NodeHandleInfo(callback, node));
+        }
         return noiseHandshake_.SendNode(node);
     }
 
@@ -806,6 +807,9 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
     }
 
     String SendSerialData(String jid, byte[] serialData, String messageType, String mediaType, String iqId) {
+        if (StringUtil.isEmpty(iqId)) {
+            iqId = GenerateIqId();
+        }
         jid = JidNormalize(jid);
         String recepid = jid;
         int index =recepid.indexOf("@");
@@ -818,9 +822,6 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         } else if (axolotlManager_.ContainsSession(recepid)) {
             return SendToContact(jid, serialData, messageType, mediaType, iqId);
         } else {
-            if (StringUtil.isEmpty(iqId)) {
-                iqId = GenerateIqId();
-            }
             LinkedList<String> jids = new LinkedList<>();
             jids.add(jid);
             String finalJid = jid;
@@ -830,16 +831,187 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         }
     }
 
+
+    class HandleGetGroupInfo implements NodeCallback{
+        byte[] message_;
+        String messageType_;
+        String mediaType_;
+        String iqId_;
+        HandleGetGroupInfo(byte[] message, String messageType, String mediaType, String iqId) {
+            message_ = message;
+            messageType_ = messageType;
+            mediaType_ = mediaType;
+            iqId_ = iqId;
+        }
+        @Override
+        public void Run(ProtocolTreeNode srcNode, ProtocolTreeNode result) {
+            ProtocolTreeNode group = result.GetChild("group");
+            if (group == null) {
+                Log.e(TAG, "获取群失败:" + srcNode.toString());
+                return;
+            }
+            String selfJid = JidNormalize(envBuilder_.getFullphone());
+            List<String> sessionJids = new LinkedList<>();
+            LinkedList<ProtocolTreeNode>  participants = group.GetChildren("participant");
+            for (ProtocolTreeNode participant : participants) {
+                String jid = participant.GetAttributeValue("jid");
+                if (jid.equals(selfJid)) {
+                    continue;
+                }
+                sessionJids.add(jid);
+            }
+            EnsureSessionsAndSendToGroup(srcNode.GetAttributeValue("to"), sessionJids, message_, messageType_, mediaType_, iqId_);
+        }
+    }
+
+
+    void EnsureSessionsAndSendToGroup(String groupId, List<String> sessionJids, byte[] message, String messageType, String mediaType, String iqId) {
+        List<String> jidsNoSession = new LinkedList<>();
+        for (String jid : sessionJids) {
+            String recepid = jid;
+            int index =recepid.indexOf("@");
+            if (index != -1) {
+                recepid = recepid.substring(0, index);
+            }
+            if (!axolotlManager_.ContainsSession(recepid)) {
+                jidsNoSession.add(jid);
+            }
+        }
+        if (jidsNoSession.isEmpty()) {
+            try {
+                SendToGroupWithSessions(groupId, sessionJids, message, messageType, mediaType, iqId);
+            } catch (UntrustedIdentityException e) {
+                e.printStackTrace();
+            } catch (NoSessionException e) {
+                e.printStackTrace();
+            } catch (InvalidKeyException e) {
+                e.printStackTrace();
+            }
+        } else {
+            GetKeysFor(jidsNoSession, (srcNode, result) -> {
+                try {
+                    SendToGroupWithSessions(groupId, jidsNoSession, message, messageType, mediaType, iqId);
+                } catch (UntrustedIdentityException e) {
+                    e.printStackTrace();
+                } catch (NoSessionException e) {
+                    e.printStackTrace();
+                } catch (InvalidKeyException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+    }
+
+    void SendToGroupWithSessions(String groupId, List<String> sessionJids, byte[] message, String messageType, String mediaType, String iqId) throws UntrustedIdentityException, NoSessionException, InvalidKeyException {
+        ProtocolTreeNode partici = new ProtocolTreeNode("participants");
+        if (!sessionJids.isEmpty()) {
+            SenderKeyDistributionMessage senderKeyDistributionMessage = axolotlManager_.GroupCreateSKMsg(groupId);
+            ByteString senderKeySerial = ByteString.copyFrom(senderKeyDistributionMessage.serialize());
+            for (String jid :  sessionJids) {
+                String recepid = jid;
+                int index =recepid.indexOf("@");
+                if (index != -1) {
+                    recepid = recepid.substring(0, index);
+                }
+                WhatsMessage.WhatsAppMessage.Builder sendKeyMessage = SerializeSenderKeyDistributionMessageToProtobuf(groupId, senderKeySerial);
+                CiphertextMessage cipherText = axolotlManager_.Encrypt(recepid, sendKeyMessage.build().toByteArray());
+                ProtocolTreeNode encNode = new ProtocolTreeNode("enc");
+                encNode.AddAttribute(new StanzaAttribute("v", "2"));
+                encNode.SetData(cipherText.serialize());
+                if (!StringUtil.isEmpty(mediaType)) {
+                    encNode.AddAttribute(new StanzaAttribute("mediatype", mediaType));
+                }
+                switch (cipherText.getType()) {
+                    case CiphertextMessage.PREKEY_TYPE:
+                    {
+                        encNode.AddAttribute(new StanzaAttribute("type", "pkmsg"));
+                    }
+                    break;
+                    case CiphertextMessage.SENDERKEY_TYPE:
+                    {
+                        encNode.AddAttribute(new StanzaAttribute("type", "skmsg"));
+                    }
+                    break;
+                    default:
+                    {
+                        encNode.AddAttribute(new StanzaAttribute("type", "msg"));
+                    }
+                }
+                ProtocolTreeNode participant = new ProtocolTreeNode("participant");
+                participant.AddAttribute(new StanzaAttribute("jid",jid));
+                participant.AddChild(encNode);
+                partici.AddChild(participant);
+            }
+        }
+
+        //组装消息
+        ProtocolTreeNode msg = new ProtocolTreeNode("message");
+        msg.AddAttribute(new StanzaAttribute("id", iqId));
+        msg.AddAttribute(new StanzaAttribute("type", messageType));
+        msg.AddAttribute(new StanzaAttribute("to", groupId));
+        msg.AddAttribute(new StanzaAttribute("t", String.valueOf(System.currentTimeMillis() / 1000)));
+
+        //添加group 消息
+        ProtocolTreeNode encNode = new ProtocolTreeNode("enc");
+        encNode.AddAttribute(new StanzaAttribute("v", "2"));
+        encNode.AddAttribute(new StanzaAttribute("type", "skmsg"));
+        if (!StringUtil.isEmpty(mediaType)) {
+            encNode.AddAttribute(new StanzaAttribute("mediatype", mediaType));
+        }
+        encNode.SetData(axolotlManager_.GroupEncrypt(groupId, message));
+        msg.AddChild(encNode);
+        msg.AddChild(partici);
+        AddTask(msg);
+    }
+
+    WhatsMessage.WhatsAppMessage.Builder SerializeSenderKeyDistributionMessageToProtobuf(String groupId, ByteString senderKeySerial) {
+        WhatsMessage.WhatsAppMessage.Builder builder = WhatsMessage.WhatsAppMessage.newBuilder();
+        WhatsMessage.WhatsAppSenderKeyDistributionMessage.Builder senderKeyBuilder = builder.getSenderKeyDistributionMessageBuilder();
+        senderKeyBuilder.setGroupId(groupId);
+        senderKeyBuilder.setAxolotlSenderKeyDistributionMessage(senderKeySerial);
+        return builder;
+    }
+
     String SendToGroup(String jid, byte[] message, String messageType, String mediaType, String iqId) {
         SenderKeyRecord senderKeyRecord = axolotlManager_.LoadSenderKey(jid);
-        if (null == senderKeyRecord) {
+        if (senderKeyRecord.isEmpty()) {
             //获取群信息
-
+            InnerGetGroupInfo(jid, new HandleGetGroupInfo(message, messageType, mediaType,iqId));
         } else {
-
+            try {
+                SendToGroupWithSessions(jid, new LinkedList<>(), message, messageType, mediaType, iqId);
+            } catch (UntrustedIdentityException e) {
+                e.printStackTrace();
+            } catch (NoSessionException e) {
+                e.printStackTrace();
+            } catch (InvalidKeyException e) {
+                e.printStackTrace();
+            }
         }
-        return "";
+        return iqId;
     }
+
+
+
+
+
+    String GetGroupInfo(String jid) {
+        return InnerGetGroupInfo(jid, null);
+    }
+
+    String InnerGetGroupInfo(String jid, NodeCallback callback) {
+        ProtocolTreeNode iq = new ProtocolTreeNode("iq");
+        iq.AddAttribute(new StanzaAttribute("id", GenerateIqId()));
+        iq.AddAttribute(new StanzaAttribute("type", "get"));
+        iq.AddAttribute(new StanzaAttribute("to", jid));
+        iq.AddAttribute(new StanzaAttribute("xmlns", "w:g2"));
+
+        ProtocolTreeNode query = new ProtocolTreeNode("query");
+        query.AddAttribute(new StanzaAttribute("request", "interactive"));
+        iq.AddChild(query);
+        return AddTask(iq, callback);
+    }
+
 
     String SendToContact(String jid, byte[] message, String messageType, String mediaType, String iqId) {
         String recepid = jid;
@@ -854,7 +1026,7 @@ public class GorgeousEngine implements NoiseHandshake.HandshakeNotify {
         } catch (UntrustedIdentityException e) {
             e.printStackTrace();
         }
-        return "";
+        return iqId;
     }
 
     String SendEncMessage(String jid, byte[] cipherText, int encType, String messageType, String mediaType, String iqId) {
